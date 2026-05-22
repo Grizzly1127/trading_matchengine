@@ -1,0 +1,36 @@
+syntax = "proto3";
+package matching.v1;
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1;matchingv1";
+
+import "common/v1/types.proto";
+
+// PriceLevel 同一价格档位的 FIFO 挂单队列。
+message PriceLevel {
+    common.v1.Decimal price = 1;
+    repeated common.v1.Order orders = 2;
+}
+
+// Snapshot 单交易对订单簿快照（对齐架构 §5.3）。
+message Snapshot {
+    string shard_id = 1;
+    string symbol = 2;
+    // 该 symbol 已应用到的 command seq（第 3 步可与 kafka_offset 对齐）。
+    uint64 seq_id = 3;
+    int64 timestamp_unix_nano = 4;
+    repeated PriceLevel bids = 5;
+    repeated PriceLevel asks = 6;
+    // 活跃订单索引，键为 order_id。
+    map<uint64, common.v1.Order> order_map = 7;
+    // FNV-64(bids + asks)，加载时校验。
+    uint64 checksum = 8;
+}
+
+// ShardManifest shard 级快照位点（data/snapshots/{shard_id}/manifest.pb）。
+message ShardManifest {
+    string shard_id = 1;
+    // shard 已恢复到的统一 command seq。
+    uint64 recovered_offset = 2;
+    // 各 symbol 最新 snapshot 的 seq_id。
+    map<string, uint64> symbol_seq = 3;
+    int64 updated_at_unix_nano = 4;
+}

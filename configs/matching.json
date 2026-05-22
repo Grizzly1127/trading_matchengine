@@ -1,0 +1,21 @@
+{
+  "data_dir": "data",
+  "shard_id": "shard-0",
+  "snapshot_every": 10000,
+  "snapshot_on_exit": true,
+  "commands_file": "",
+  "default_symbol": "BTC-USDT",
+  "log": {
+    "level": "info",
+    "dev": true,
+    "file": "logs/matching.log",
+    "async": true,
+    "buffer_size": 512,
+    "max_size_mb": 100,
+    "max_age_days": 7,
+    "max_backups": 30,
+    "compress": true,
+    "local_time": true,
+    "rotate_daily": true
+  }
+}

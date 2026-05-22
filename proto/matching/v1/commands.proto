@@ -1,0 +1,23 @@
+syntax = "proto3";
+package matching.v1;
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1;matchingv1";
+
+import "common/v1/types.proto";
+
+// NewOrderCommand 下单命令（Kafka order.commands / WAL payload）。
+message NewOrderCommand {
+    uint64 command_id = 1;
+    common.v1.Order order = 2;
+    // 第 3 步 Kafka 对齐：消费位点（第 2 步本地 WAL 可填 0）。
+    uint32 kafka_partition = 3;
+    uint64 kafka_offset = 4;
+}
+
+// CancelOrderCommand 撤单命令；目标订单不存在时幂等忽略。
+message CancelOrderCommand {
+    uint64 command_id = 1;
+    string symbol = 2;
+    uint64 order_id = 3;
+    uint32 kafka_partition = 4;
+    uint64 kafka_offset = 5;
+}

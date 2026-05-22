@@ -1,0 +1,38 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test & coverage
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env & local data
+.env
+.env.*
+!.env.example
+/data/
+*.log
+
+# Proto generated (uncomment when using buf/protoc)
+# proto/**/*.pb.go
+
+# OS
+.DS_Store
+Thumbs.db
