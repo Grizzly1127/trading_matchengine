@@ -193,6 +193,29 @@ func TestEngine_cancelPersistsAfterRestart(t *testing.T) {
 	}
 }
 
+func TestEngine_MaxKafkaOffset(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(t, dir)
+
+	e, err := recovery.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+
+	cmd := limitSell(50, "100", "1")
+	cmd.KafkaPartition = 0
+	cmd.KafkaOffset = 42
+	if _, err := e.ApplyNewOrder(cmd); err != nil {
+		t.Fatal(err)
+	}
+
+	off, ok := e.MaxKafkaOffset(0)
+	if !ok || off != 42 {
+		t.Fatalf("max offset = %d ok=%v, want 42 true", off, ok)
+	}
+}
+
 func TestEngine_walAndSnapshotFilesCreated(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir)

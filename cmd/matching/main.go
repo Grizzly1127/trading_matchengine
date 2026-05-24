@@ -1,4 +1,4 @@
-// Matching 引擎本地进程入口。
+// Matching 引擎进程入口：本地 JSONL（3.1）或 Kafka（3.2）。
 package main
 
 import (
@@ -11,8 +11,12 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/cli"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/config"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/consumer"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
+	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/rs/zerolog"
 )
 
 func main() {
@@ -67,32 +71,20 @@ func main() {
 		Str("config", *configPath).
 		Str("shard_id", cfg.ShardID).
 		Str("data_dir", cfg.DataDir).
-		Str("log_file", cfg.Log.File).
-		Bool("log_async", cfg.Log.Async).
+		Bool("kafka_enabled", cfg.Kafka.Enabled).
 		Uint64("recovered_offset", eng.RecoveredOffset()).
 		Uint64("last_seq", eng.LastSeq()).
 		Msg("matching engine ready")
 
-	input := os.Stdin
-	if cfg.CommandsFile != "" {
-		f, err := os.Open(cfg.CommandsFile)
-		if err != nil {
-			log.Fatal().Err(err).Str("file", cfg.CommandsFile).Msg("open commands file")
-		}
-		defer f.Close()
-		input = f
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	runErr := cli.Run(ctx, eng, cli.Config{
-		DefaultSymbol: cfg.DefaultSymbol,
-		Input:         input,
-		Output:        os.Stdout,
-		UsageOutput:   os.Stderr,
-		ShowUsageHint: cfg.CommandsFile == "" && isTerminal(os.Stdin),
-	})
+	var runErr error
+	if cfg.Kafka.Enabled {
+		runErr = runKafka(ctx, cfg, eng, log)
+	} else {
+		runErr = runCLI(ctx, cfg, eng)
+	}
 
 	lastSeq := eng.LastSeq()
 	if err := cli.Shutdown(eng, cfg.SnapshotOnExit); err != nil {
@@ -107,6 +99,67 @@ func main() {
 	if runErr != nil {
 		log.Fatal().Err(runErr).Msg("exit")
 	}
+}
+
+func runCLI(ctx context.Context, cfg config.Config, eng *recovery.Engine) error {
+	input := os.Stdin
+	if cfg.CommandsFile != "" {
+		f, err := os.Open(cfg.CommandsFile)
+		if err != nil {
+			return fmt.Errorf("open commands file: %w", err)
+		}
+		defer f.Close()
+		input = f
+	}
+	return cli.Run(ctx, eng, cli.Config{
+		DefaultSymbol: cfg.DefaultSymbol,
+		Input:         input,
+		Output:        os.Stdout,
+		UsageOutput:   os.Stderr,
+		ShowUsageHint: cfg.CommandsFile == "" && isTerminal(os.Stdin),
+	})
+}
+
+func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log zerolog.Logger) error {
+	partition := cfg.Kafka.Partition
+	resume, hasResume := eng.MaxKafkaOffset(uint32(partition))
+	start := consumer.StartOffset(resume, hasResume)
+
+	log.Info().
+		Int("partition", partition).
+		Uint64("resume_offset", resume).
+		Bool("has_resume", hasResume).
+		Int64("start_offset", start).
+		Strs("brokers", cfg.Kafka.Brokers).
+		Str("command_topic", cfg.Kafka.CommandTopic).
+		Msg("kafka consumer starting")
+
+	reader, err := kafka.NewCommandReader(kafka.ReaderConfig{
+		Brokers:     cfg.Kafka.Brokers,
+		Topic:       cfg.Kafka.CommandTopic,
+		GroupID:     cfg.Kafka.GroupID,
+		Partition:   partition,
+		StartOffset: start,
+	})
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
+	defer writer.Close()
+
+	pub := &publisher.KafkaPublisher{
+		Producer:   writer,
+		MatchTopic: cfg.Kafka.MatchTopic,
+		TradeTopic: cfg.Kafka.TradeTopic,
+	}
+	h := &consumer.Handler{
+		Engine:    eng,
+		Publisher: pub,
+		Partition: uint32(partition),
+	}
+	return consumer.Run(ctx, reader, h)
 }
 
 func isTerminal(f *os.File) bool {

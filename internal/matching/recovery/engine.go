@@ -101,6 +101,58 @@ func (e *Engine) RecoveredOffset() uint64 {
 	return e.recovered
 }
 
+// MaxKafkaOffset 扫描 WAL，返回指定 partition 已持久化的最大 Kafka offset。
+func (e *Engine) MaxKafkaOffset(partition uint32) (uint64, bool) {
+	it, err := e.reader.ReadFrom(0)
+	if err != nil {
+		return 0, false
+	}
+	defer it.Close()
+
+	var max uint64
+	found := false
+	for it.Next() {
+		rec := it.Record()
+		p, off, ok := kafkaOffsetFromRecord(rec)
+		if !ok || p != partition {
+			continue
+		}
+		if !found || off > max {
+			max = off
+			found = true
+		}
+	}
+	if err := it.Err(); err != nil {
+		return 0, false
+	}
+	return max, found
+}
+
+func kafkaOffsetFromRecord(rec wal.Record) (partition uint32, offset uint64, ok bool) {
+	switch rec.EventType {
+	case wal.EventTypeNewOrder:
+		cmd := &matchingv1.NewOrderCommand{}
+		if err := proto.Unmarshal(rec.Payload, cmd); err != nil {
+			return 0, 0, false
+		}
+		if cmd.GetKafkaOffset() == 0 {
+			return 0, 0, false
+		}
+		return cmd.GetKafkaPartition(), cmd.GetKafkaOffset(), true
+	case wal.EventTypeCancelOrder:
+		cmd := &matchingv1.CancelOrderCommand{}
+		if err := proto.Unmarshal(rec.Payload, cmd); err != nil {
+			return 0, 0, false
+		}
+		if cmd.GetKafkaOffset() == 0 {
+			return 0, 0, false
+		}
+		return cmd.GetKafkaPartition(), cmd.GetKafkaOffset(), true
+	default:
+		return 0, 0, false
+	}
+}
+
 // Close 关闭 WAL 写入器。
 func (e *Engine) Close() error {
 	return e.wal.Close()

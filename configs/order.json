@@ -1,0 +1,24 @@
+{
+  "grpc_listen": ":50051",
+  "database_url": "postgres://trading:trading@localhost:5432/trading?sslmode=disable",
+  "migrate_on_start": true,
+  "default_symbol": "BTC-USDT",
+  "kafka": {
+    "brokers": ["localhost:9092"],
+    "command_topic": "order.commands",
+    "partition": 0
+  },
+  "log": {
+    "level": "info",
+    "dev": true,
+    "file": "logs/order.log",
+    "async": true,
+    "buffer_size": 512,
+    "max_size_mb": 100,
+    "max_age_days": 7,
+    "max_backups": 30,
+    "compress": true,
+    "local_time": true,
+    "rotate_daily": true
+  }
+}

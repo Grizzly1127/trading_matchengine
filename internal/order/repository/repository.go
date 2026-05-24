@@ -1,0 +1,167 @@
+package repository
+
+import (
+	"context"
+	"embed"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+//go:embed migrations/*.sql
+var migrationFS embed.FS
+
+// Order 持久化订单记录。
+type Order struct {
+	ID             uint64
+	UserID         uint64
+	ClientOrderID  string
+	Symbol         string
+	Side           int16
+	OrderType      int16
+	Price          *string
+	Quantity       string
+	FilledQuantity string
+	Status         string
+	Version        int32
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// Repository 封装 PostgreSQL 订单读写。
+type Repository struct {
+	pool *pgxpool.Pool
+}
+
+// New 创建 Repository。
+func New(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
+}
+
+// NewPool 创建连接池。
+func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect database: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return pool, nil
+}
+
+// MigrateUp 执行内嵌迁移（001_create_orders.up.sql）。
+func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {
+	b, err := migrationFS.ReadFile("migrations/001_create_orders.up.sql")
+	if err != nil {
+		return fmt.Errorf("read migration: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(b)); err != nil {
+		return fmt.Errorf("apply migration: %w", err)
+	}
+	return nil
+}
+
+// FindByClientOrderID 按幂等键查已有订单。
+func (r *Repository) FindByClientOrderID(ctx context.Context, userID uint64, clientOrderID string) (*Order, error) {
+	const q = `
+SELECT o.id, o.user_id, o.client_order_id, o.symbol, o.side, o.order_type,
+       o.price::text, o.quantity::text, o.filled_quantity::text,
+       o.status, o.version, o.created_at, o.updated_at
+FROM client_order_idempotency i
+JOIN orders o ON o.id = i.order_id
+WHERE i.user_id = $1 AND i.client_order_id = $2`
+
+	row := r.pool.QueryRow(ctx, q, userID, clientOrderID)
+	return scanOrder(row)
+}
+
+// InsertPending 在同一事务内写入 orders 与幂等表。
+func (r *Repository) InsertPending(ctx context.Context, in InsertPendingInput) (*Order, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const insertOrder = `
+INSERT INTO orders (user_id, client_order_id, symbol, side, order_type, price, quantity, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+RETURNING id, user_id, client_order_id, symbol, side, order_type,
+          price::text, quantity::text, filled_quantity::text,
+          status, version, created_at, updated_at`
+
+	row := tx.QueryRow(ctx, insertOrder,
+		in.UserID,
+		in.ClientOrderID,
+		in.Symbol,
+		in.Side,
+		in.OrderType,
+		in.Price,
+		in.Quantity,
+	)
+	order, err := scanOrder(row)
+	if err != nil {
+		return nil, err
+	}
+
+	const insertIdem = `
+INSERT INTO client_order_idempotency (user_id, client_order_id, order_id)
+VALUES ($1, $2, $3)`
+	if _, err := tx.Exec(ctx, insertIdem, in.UserID, in.ClientOrderID, order.ID); err != nil {
+		return nil, fmt.Errorf("insert idempotency: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return order, nil
+}
+
+// InsertPendingInput 新订单写入参数。
+type InsertPendingInput struct {
+	UserID        uint64
+	ClientOrderID string
+	Symbol        string
+	Side          int16
+	OrderType     int16
+	Price         *string
+	Quantity      string
+}
+
+func scanOrder(row pgx.Row) (*Order, error) {
+	var o Order
+	var price *string
+	if err := row.Scan(
+		&o.ID,
+		&o.UserID,
+		&o.ClientOrderID,
+		&o.Symbol,
+		&o.Side,
+		&o.OrderType,
+		&price,
+		&o.Quantity,
+		&o.FilledQuantity,
+		&o.Status,
+		&o.Version,
+		&o.CreatedAt,
+		&o.UpdatedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan order: %w", err)
+	}
+	if price != nil && strings.TrimSpace(*price) != "" {
+		o.Price = price
+	}
+	return &o, nil
+}

@@ -1,0 +1,13 @@
+syntax = "proto3";
+package matching.v1;
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1;matchingv1";
+
+import "matching/v1/commands.proto";
+
+// OrderCommandEnvelope order.commands topic 单条消息体。
+message OrderCommandEnvelope {
+    oneof command {
+        NewOrderCommand new_order = 1;
+        CancelOrderCommand cancel_order = 2;
+    }
+}

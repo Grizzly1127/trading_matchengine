@@ -1,0 +1,29 @@
+syntax = "proto3";
+package matching.v1;
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1;matchingv1";
+
+import "common/v1/types.proto";
+
+enum MatchEventType {
+    MATCH_EVENT_TYPE_UNSPECIFIED = 0;
+    ORDER_ACCEPTED = 1;
+    ORDER_FILLED = 2;
+    ORDER_PARTIAL_FILLED = 3;
+    ORDER_CANCELED = 4;
+}
+
+// MatchEvent 订单状态变更（match.events topic）。
+message MatchEvent {
+    uint64 command_id = 1;
+    string symbol = 2;
+    uint64 order_id = 3;
+    MatchEventType event_type = 4;
+    common.v1.Order order = 5;
+    uint64 wal_seq = 6;
+}
+
+// TradeEvent 成交记录（trade.events topic）。
+message TradeEvent {
+    common.v1.Trade trade = 1;
+    uint64 wal_seq = 2;
+}

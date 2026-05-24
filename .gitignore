@@ -28,6 +28,7 @@ go.work.sum
 .env.*
 !.env.example
 /data/
+/run/
 *.log
 
 # Proto generated (uncomment when using buf/protoc)

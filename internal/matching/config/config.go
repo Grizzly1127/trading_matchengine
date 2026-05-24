@@ -9,13 +9,25 @@ import (
 
 // Config 是 matching 进程启动配置。
 type Config struct {
-	DataDir        string    `json:"data_dir"`
-	ShardID        string    `json:"shard_id"`
-	SnapshotEvery  uint64    `json:"snapshot_every"`
-	SnapshotOnExit bool      `json:"snapshot_on_exit"`
-	CommandsFile   string    `json:"commands_file"`
-	DefaultSymbol  string    `json:"default_symbol"`
-	Log            LogConfig `json:"log"`
+	DataDir        string      `json:"data_dir"`
+	ShardID        string      `json:"shard_id"`
+	SnapshotEvery  uint64      `json:"snapshot_every"`
+	SnapshotOnExit bool        `json:"snapshot_on_exit"`
+	CommandsFile   string      `json:"commands_file"`
+	DefaultSymbol  string      `json:"default_symbol"`
+	Kafka          KafkaConfig `json:"kafka"`
+	Log            LogConfig   `json:"log"`
+}
+
+// KafkaConfig 控制 Kafka 消费与发布（3.2）。
+type KafkaConfig struct {
+	Enabled      bool     `json:"enabled"`
+	Brokers      []string `json:"brokers"`
+	GroupID      string   `json:"group_id"`
+	CommandTopic string   `json:"command_topic"`
+	MatchTopic   string   `json:"match_topic"`
+	TradeTopic   string   `json:"trade_topic"`
+	Partition    int      `json:"partition"`
 }
 
 // LogConfig 控制结构化日志。
@@ -55,6 +67,7 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults(raw)
+	cfg.applyKafkaDefaults(raw)
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -129,5 +142,40 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.DataDir) == "" {
 		return fmt.Errorf("config: data_dir is required")
 	}
+	if c.Kafka.Enabled {
+		if len(c.Kafka.Brokers) == 0 {
+			return fmt.Errorf("config: kafka.brokers is required when kafka.enabled")
+		}
+		if strings.TrimSpace(c.Kafka.GroupID) == "" {
+			return fmt.Errorf("config: kafka.group_id is required when kafka.enabled")
+		}
+		if strings.TrimSpace(c.Kafka.CommandTopic) == "" {
+			return fmt.Errorf("config: kafka.command_topic is required when kafka.enabled")
+		}
+		if strings.TrimSpace(c.Kafka.MatchTopic) == "" {
+			return fmt.Errorf("config: kafka.match_topic is required when kafka.enabled")
+		}
+		if strings.TrimSpace(c.Kafka.TradeTopic) == "" {
+			return fmt.Errorf("config: kafka.trade_topic is required when kafka.enabled")
+		}
+	}
 	return nil
+}
+
+func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
+	if _, ok := raw["kafka"]; !ok {
+		return
+	}
+	if c.Kafka.GroupID == "" && c.Kafka.Enabled {
+		c.Kafka.GroupID = "matching-" + c.ShardID
+	}
+	if c.Kafka.CommandTopic == "" {
+		c.Kafka.CommandTopic = "order.commands"
+	}
+	if c.Kafka.MatchTopic == "" {
+		c.Kafka.MatchTopic = "match.events"
+	}
+	if c.Kafka.TradeTopic == "" {
+		c.Kafka.TradeTopic = "trade.events"
+	}
 }
