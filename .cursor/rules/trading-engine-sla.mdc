@@ -1,0 +1,60 @@
+---
+description: 交易撮合引擎开发 SLA——高性能、高可用、低延迟、高并发
+alwaysApply: true
+---
+
+# 交易引擎开发 SLA
+
+本仓库为**虚拟货币交易所撮合引擎**。所有新增/修改代码必须以 **高性能 · 高可用 · 低延迟 · 高并发** 为前提设计，并与 [docs/architecture-spec.md](docs/architecture-spec.md) 一致。
+
+## 设计优先级（冲突时按此取舍）
+
+1. **正确性与可恢复性**（WAL、幂等、状态机）> 2. **撮合热路径延迟** > 3. **吞吐与水平扩展** > 4. **开发便利**
+
+## 热路径（Matching Engine / orderbook / matcher）
+
+- 每个 `symbol` **单线程串行**处理；禁止在同一 symbol 上引入多 goroutine 竞争。
+- **先写 WAL（fsync）再改内存**；禁止先改 orderbook 后落盘。
+- 热路径上避免：反射、`interface{}` 装箱、无界 channel、阻塞 I/O、全局锁、在循环内 `append` 导致频繁扩容。
+- 优先：预分配、`sync.Pool`（有度量再引入）、`uint64` 订单 ID、按 price level 索引的 orderbook。
+- Kafka：`enable.auto.commit=false`，**WAL fsync 成功后再 commit offset**。
+
+```go
+// ❌ 热路径：持锁做网络/DB
+mu.Lock()
+resp, _ := http.Get(...)
+book.Apply(resp)
+
+// ✅ 命令已在 WAL 落盘后再改内存；I/O 在边界外完成
+if err := wal.Append(cmd); err != nil { return err }
+if err := wal.Fsync(); err != nil { return err }
+engine.Apply(cmd)
+```
+
+## 高并发与扩展
+
+- 水平扩展靠 **分片**（`symbol -> shard -> partition`），不靠单进程无限堆 goroutine。
+- 跨服务**不用 2PC/XA**；用 **Transactional Outbox + 幂等消费 + 超时补偿**。
+- DB 状态迁移用乐观锁：`UPDATE ... WHERE id=? AND status=? AND version=?`。
+- 幂等：`client_order_id` 唯一；消费端按 `order_id` / 事件 ID 去重。
+
+## 高可用
+
+- 无状态服务（Gateway、Order、Push）可水平扩；有状态撮合引擎依赖 **WAL + Snapshot** 恢复。
+- 超时、熔断、限流放在网关/入口；核心路径失败要**可观测**（指标 + 结构化日志）。
+- 关键指标需可接入 Prometheus：撮合延迟 P99、WAL 写延迟、Kafka lag、磁盘使用率。
+
+## 实现前自检
+
+- 是否增加了热路径上的分配、锁或同步 RPC？
+- 故障重启后能否从 WAL/Snapshot 恢复到一致状态？
+- 重复投递同一 Kafka 消息是否安全？
+- 是否误把 JSON 大数 `order_id` 用 `float64` 解析？（应用 **string 十进制** 或 `uint64`）
+
+## 禁止
+
+- 撮合引擎热路径上直接打 PostgreSQL / Redis。
+- 跨 symbol 共享可变 orderbook 状态而无分片隔离。
+- 为“省事”牺牲 WAL 顺序或跳过 fsync（除非架构文档明确允许的批量策略且有测试）。
+
+不确定时先读 `docs/architecture-spec.md` 与 `docs/development-roadmap.md`，再改代码。

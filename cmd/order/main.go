@@ -1,4 +1,4 @@
-// Order Service 进程入口（第 4 步 4.1：PlaceOrder + DB + 直连 Kafka）。
+// Order Service 进程入口（第 4 步 4.2：PlaceOrder + Transactional Outbox + Relay）。
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/handler"
-	"github.com/Grizzly1127/trading_matchengine/internal/order/publisher"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/service"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
@@ -70,16 +70,13 @@ func main() {
 		log.Info().Msg("database migration applied")
 	}
 
+	repo := repository.New(pool)
 	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
 	defer writer.Close()
 
 	svc := &service.Service{
-		Repo: repository.New(pool),
-		Publisher: &publisher.CommandPublisher{
-			Writer:    writer,
-			Topic:     cfg.Kafka.CommandTopic,
-			Partition: cfg.Kafka.Partition,
-		},
+		Repo:        repo,
+		OutboxTopic: cfg.Kafka.CommandTopic,
 	}
 
 	grpcServer := grpc.NewServer()
@@ -93,11 +90,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	relay := &outbox.Relay{
+		Store:  repo,
+		Writer: writer,
+		Log:    log.With().Str("component", "outbox_relay").Logger(),
+		Config: outbox.RelayConfig{Partition: cfg.Kafka.Partition},
+	}
+	go relay.Run(ctx)
+
 	go func() {
 		log.Info().
 			Str("config", *configPath).
 			Str("grpc_listen", cfg.GRPCListen).
 			Str("command_topic", cfg.Kafka.CommandTopic).
+			Int("partition", cfg.Kafka.Partition).
 			Msg("order service ready")
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error().Err(err).Msg("grpc serve")

@@ -9,7 +9,6 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/Grizzly1127/trading_matchengine/internal/order/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
@@ -24,20 +23,15 @@ type OrderStore interface {
 	InsertPending(ctx context.Context, in repository.InsertPendingInput) (*repository.Order, error)
 }
 
-// CommandSender 撮合命令发布接口（便于测试）。
-type CommandSender interface {
-	PublishNewOrder(ctx context.Context, order *repository.Order) error
-}
-
 // Service 订单业务逻辑。
 type Service struct {
-	Repo      OrderStore
-	Publisher CommandSender
+	Repo        OrderStore
+	OutboxTopic string
 }
 
-// PlaceOrder 落库 PENDING 订单并直接发布 Kafka 命令（无 Outbox）。
+// PlaceOrder 落库 PENDING 订单并在同事务写入 order_outbox；Kafka 由 Relay 异步投递。
 func (s *Service) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (*orderv1.PlaceOrderResponse, error) {
-	if s == nil || s.Repo == nil || s.Publisher == nil {
+	if s == nil || s.Repo == nil {
 		return nil, fmt.Errorf("order service not configured")
 	}
 	if req == nil {
@@ -48,6 +42,7 @@ func (s *Service) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest
 	if err != nil {
 		return nil, err
 	}
+	in.OutboxTopic = s.OutboxTopic
 
 	existing, err := s.Repo.FindByClientOrderID(ctx, in.UserID, in.ClientOrderID)
 	if err != nil {
@@ -60,10 +55,6 @@ func (s *Service) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest
 	order, err := s.Repo.InsertPending(ctx, in)
 	if err != nil {
 		return nil, err
-	}
-
-	if err := s.Publisher.PublishNewOrder(ctx, order); err != nil {
-		return nil, fmt.Errorf("publish new order command: %w", err)
 	}
 
 	return toPlaceOrderResponse(order, false), nil
@@ -135,5 +126,3 @@ func toPlaceOrderResponse(order *repository.Order, idempotentHit bool) *orderv1.
 		IdempotentHit: idempotentHit,
 	}
 }
-
-var _ CommandSender = (*publisher.CommandPublisher)(nil)

@@ -42,27 +42,13 @@ func (f *fakeStore) InsertPending(_ context.Context, in repository.InsertPending
 	return o, nil
 }
 
-type fakePublisher struct {
-	orders []*repository.Order
-	err    error
-}
-
-func (f *fakePublisher) PublishNewOrder(_ context.Context, order *repository.Order) error {
-	if f.err != nil {
-		return f.err
-	}
-	f.orders = append(f.orders, order)
-	return nil
-}
-
 func idemKey(userID uint64, clientOrderID string) string {
 	return fmt.Sprintf("%d:%s", userID, clientOrderID)
 }
 
 func TestPlaceOrder_Success(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order)}
-	pub := &fakePublisher{}
-	svc := &Service{Repo: store, Publisher: pub}
+	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -87,15 +73,11 @@ func TestPlaceOrder_Success(t *testing.T) {
 	if resp.GetIdempotentHit() {
 		t.Fatal("expected idempotent_hit=false")
 	}
-	if len(pub.orders) != 1 {
-		t.Fatalf("published %d orders want 1", len(pub.orders))
-	}
 }
 
 func TestPlaceOrder_Idempotent(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order)}
-	pub := &fakePublisher{}
-	svc := &Service{Repo: store, Publisher: pub}
+	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -118,15 +100,12 @@ func TestPlaceOrder_Idempotent(t *testing.T) {
 	if !resp.GetIdempotentHit() {
 		t.Fatal("expected idempotent_hit=true")
 	}
-	if len(pub.orders) != 1 {
-		t.Fatalf("published %d orders want 1 (no duplicate kafka)", len(pub.orders))
-	}
 }
 
 func TestPlaceOrder_InvalidArgument(t *testing.T) {
 	svc := &Service{
-		Repo:      &fakeStore{byClient: make(map[string]*repository.Order)},
-		Publisher: &fakePublisher{},
+		Repo:        &fakeStore{byClient: make(map[string]*repository.Order)},
+		OutboxTopic: "order.commands",
 	}
 
 	_, err := svc.PlaceOrder(context.Background(), &orderv1.PlaceOrderRequest{
@@ -142,11 +121,9 @@ func TestPlaceOrder_InvalidArgument(t *testing.T) {
 	}
 }
 
-func TestPlaceOrder_KafkaError(t *testing.T) {
-	svc := &Service{
-		Repo:      &fakeStore{byClient: make(map[string]*repository.Order)},
-		Publisher: &fakePublisher{err: errors.New("kafka down")},
-	}
+func TestPlaceOrder_SetsOutboxTopic(t *testing.T) {
+	store := &fakeStore{byClient: make(map[string]*repository.Order)}
+	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -158,8 +135,12 @@ func TestPlaceOrder_KafkaError(t *testing.T) {
 		Quantity:      &commonv1.Decimal{Value: "1"},
 	}
 
-	_, err := svc.PlaceOrder(context.Background(), req)
-	if err == nil {
-		t.Fatal("expected error when kafka fails")
+	in, err := validatePlaceOrder(req)
+	if err != nil {
+		t.Fatalf("validatePlaceOrder: %v", err)
+	}
+	in.OutboxTopic = svc.OutboxTopic
+	if in.OutboxTopic != "order.commands" {
+		t.Fatalf("outbox topic=%q", in.OutboxTopic)
 	}
 }

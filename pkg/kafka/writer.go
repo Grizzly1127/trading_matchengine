@@ -34,8 +34,13 @@ func NewEventWriter(cfg WriterConfig) *EventWriter {
 	}
 }
 
-// Write 写入指定 topic。
+// Write 写入指定 topic（由 broker 选择 partition）。
 func (w *EventWriter) Write(ctx context.Context, topic string, key, value []byte) error {
+	return w.WriteAt(ctx, topic, -1, key, value)
+}
+
+// WriteAt 写入指定 topic 与 partition；-1 表示由 broker 选择 partition。
+func (w *EventWriter) WriteAt(ctx context.Context, topic string, partition int, key, value []byte) error {
 	writer, ok := w.writers[topic]
 	if !ok {
 		if len(w.brokers) == 0 {
@@ -49,11 +54,15 @@ func (w *EventWriter) Write(ctx context.Context, topic string, key, value []byte
 		}
 		w.writers[topic] = writer
 	}
-	return writer.WriteMessages(ctx, kafkago.Message{
+	msg := kafkago.Message{
 		Topic: topic,
 		Key:   key,
 		Value: value,
-	})
+	}
+	if partition >= 0 {
+		msg.Partition = partition
+	}
+	return writer.WriteMessages(ctx, msg)
 }
 
 // Close 关闭所有 writer。

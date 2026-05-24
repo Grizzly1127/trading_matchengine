@@ -17,7 +17,7 @@ type Config struct {
 	Log            LogConfig   `json:"log"`
 }
 
-// KafkaConfig 控制向 order.commands 直接发布（第 4 步 4.1，尚未 Outbox）。
+// KafkaConfig 控制 Outbox Relay 投递至 order.commands。
 type KafkaConfig struct {
 	Brokers      []string `json:"brokers"`
 	CommandTopic string   `json:"command_topic"`

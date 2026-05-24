@@ -1,17 +1,16 @@
-package publisher
+package outbox
 
 import (
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 )
 
-func TestBuildNewOrderEnvelope(t *testing.T) {
+func TestBuildNewOrderPayload(t *testing.T) {
 	price := "65000.5"
-	order := &repository.Order{
+	order := OrderSnapshot{
 		ID:            42,
 		ClientOrderID: "demo-001",
 		Symbol:        "BTC-USDT",
@@ -19,17 +18,15 @@ func TestBuildNewOrderEnvelope(t *testing.T) {
 		OrderType:     1,
 		Price:         &price,
 		Quantity:      "0.01",
-		Status:        "PENDING",
 	}
 
-	env := buildNewOrderEnvelope(order)
-	b, err := proto.Marshal(env)
+	payload, err := BuildNewOrderPayload(order, 99)
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		t.Fatalf("BuildNewOrderPayload: %v", err)
 	}
 
 	var decoded matchingv1.OrderCommandEnvelope
-	if err := proto.Unmarshal(b, &decoded); err != nil {
+	if err := proto.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
@@ -37,8 +34,8 @@ func TestBuildNewOrderEnvelope(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected new_order command")
 	}
-	if cmd.GetCommandId() != 42 {
-		t.Fatalf("command_id=%d want 42", cmd.GetCommandId())
+	if cmd.GetCommandId() != 99 {
+		t.Fatalf("command_id=%d want 99 (outbox.id)", cmd.GetCommandId())
 	}
 	if cmd.GetOrder().GetOrderId() != 42 {
 		t.Fatalf("order_id=%d want 42", cmd.GetOrder().GetOrderId())
