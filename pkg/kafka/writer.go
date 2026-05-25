@@ -54,8 +54,8 @@ func (w *EventWriter) WriteAt(ctx context.Context, topic string, partition int, 
 		}
 		w.writers[topic] = writer
 	}
+	// Writer 已绑定 Topic，Message 不得再指定 Topic（kafka-go 约束）。
 	msg := kafkago.Message{
-		Topic: topic,
 		Key:   key,
 		Value: value,
 	}

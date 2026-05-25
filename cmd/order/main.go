@@ -83,6 +83,8 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 	orderv1.RegisterOrderServiceServer(grpcServer, &handler.Server{Svc: svc})
+	balanceSvc := &service.BalanceService{Repo: repo}
+	orderv1.RegisterBalanceServiceServer(grpcServer, &handler.BalanceServer{Svc: balanceSvc})
 
 	lis, err := net.Listen("tcp", cfg.GRPCListen)
 	if err != nil {

@@ -32,6 +32,14 @@ build:
 	go build -o $(BIN_DIR)/matching ./cmd/matching
 	go build -o $(BIN_DIR)/order ./cmd/order
 
+build-matching:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/matching ./cmd/matching
+
+build-order:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/order ./cmd/order
+
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html
 
