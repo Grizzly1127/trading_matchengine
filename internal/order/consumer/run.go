@@ -1,0 +1,41 @@
+package consumer
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
+)
+
+// Processor 处理单条 Kafka 消息。
+type Processor interface {
+	Process(ctx context.Context, msg kafka.Message) error
+}
+
+// Run 循环消费：处理成功后才 Commit offset。
+func Run(ctx context.Context, c kafka.Consumer, h Processor) error {
+	if c == nil || h == nil {
+		return fmt.Errorf("consumer: consumer and handler are required")
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		msg, err := c.Read(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("consumer: read: %w", err)
+		}
+		if err := h.Process(ctx, msg); err != nil {
+			return fmt.Errorf("consumer: process offset %d: %w", msg.Offset, err)
+		}
+		if err := c.Commit(ctx, msg); err != nil {
+			return fmt.Errorf("consumer: commit offset %d: %w", msg.Offset, err)
+		}
+	}
+}

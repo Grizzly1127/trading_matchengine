@@ -1,4 +1,4 @@
-// Order Service 进程入口（第 4 步 4.2：PlaceOrder + Transactional Outbox + Relay）。
+// Order Service 进程入口（第 4 步：PlaceOrder + Outbox + 事件消费骨架）。
 package main
 
 import (
@@ -10,9 +10,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/config"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/consumer"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/handler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
@@ -98,11 +100,18 @@ func main() {
 	}
 	go relay.Run(ctx)
 
+	if cfg.Kafka.ConsumerEnabled {
+		startEventConsumers(ctx, log, cfg, repo)
+	}
+
 	go func() {
 		log.Info().
 			Str("config", *configPath).
 			Str("grpc_listen", cfg.GRPCListen).
 			Str("command_topic", cfg.Kafka.CommandTopic).
+			Str("match_topic", cfg.Kafka.MatchTopic).
+			Str("trade_topic", cfg.Kafka.TradeTopic).
+			Bool("consumer_enabled", cfg.Kafka.ConsumerEnabled).
 			Int("partition", cfg.Kafka.Partition).
 			Msg("order service ready")
 		if err := grpcServer.Serve(lis); err != nil {
@@ -113,4 +122,31 @@ func main() {
 	<-ctx.Done()
 	log.Info().Msg("shutting down")
 	grpcServer.GracefulStop()
+}
+
+func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Config, repo *repository.Repository) {
+	base := consumer.TopicConsumerConfig{
+		Brokers:     cfg.Kafka.Brokers,
+		GroupID:     cfg.Kafka.GroupID,
+		Partition:   cfg.Kafka.Partition,
+		StartOffset: cfg.Kafka.ConsumerStartOffset,
+	}
+
+	matchLog := log.With().Str("component", "match_consumer").Logger()
+	go func() {
+		matchCfg := base
+		matchCfg.Topic = cfg.Kafka.MatchTopic
+		if err := consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{Repo: repo}); err != nil && ctx.Err() == nil {
+			matchLog.Error().Err(err).Msg("match consumer stopped")
+		}
+	}()
+
+	tradeLog := log.With().Str("component", "trade_consumer").Logger()
+	go func() {
+		tradeCfg := base
+		tradeCfg.Topic = cfg.Kafka.TradeTopic
+		if err := consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{Repo: repo}); err != nil && ctx.Err() == nil {
+			tradeLog.Error().Err(err).Msg("trade consumer stopped")
+		}
+	}()
 }

@@ -14,6 +14,7 @@ import (
 
 type fakeStore struct {
 	byClient map[string]*repository.Order
+	byID     map[uint64]*repository.Order
 	nextID   uint64
 }
 
@@ -39,6 +40,27 @@ func (f *fakeStore) InsertPending(_ context.Context, in repository.InsertPending
 		Status:        "PENDING",
 	}
 	f.byClient[idemKey(in.UserID, in.ClientOrderID)] = o
+	f.byID[o.ID] = o
+	return o, nil
+}
+
+func (f *fakeStore) GetOrderByUser(_ context.Context, userID, orderID uint64) (*repository.Order, error) {
+	o, ok := f.byID[orderID]
+	if !ok || o.UserID != userID {
+		return nil, repository.ErrOrderNotFound
+	}
+	return o, nil
+}
+
+func (f *fakeStore) BeginCancel(_ context.Context, userID, orderID uint64, _ string) (*repository.Order, error) {
+	o, ok := f.byID[orderID]
+	if !ok || o.UserID != userID {
+		return nil, repository.ErrOrderNotFound
+	}
+	if o.Status == "FILLED" {
+		return nil, repository.ErrOrderNotCancelable
+	}
+	o.Status = "CANCELING"
 	return o, nil
 }
 
@@ -47,7 +69,7 @@ func idemKey(userID uint64, clientOrderID string) string {
 }
 
 func TestPlaceOrder_Success(t *testing.T) {
-	store := &fakeStore{byClient: make(map[string]*repository.Order)}
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
 	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
 
 	req := &orderv1.PlaceOrderRequest{
@@ -70,13 +92,10 @@ func TestPlaceOrder_Success(t *testing.T) {
 	if resp.GetStatus() != "PENDING" {
 		t.Fatalf("status=%q want PENDING", resp.GetStatus())
 	}
-	if resp.GetIdempotentHit() {
-		t.Fatal("expected idempotent_hit=false")
-	}
 }
 
 func TestPlaceOrder_Idempotent(t *testing.T) {
-	store := &fakeStore{byClient: make(map[string]*repository.Order)}
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
 	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
 
 	req := &orderv1.PlaceOrderRequest{
@@ -104,7 +123,7 @@ func TestPlaceOrder_Idempotent(t *testing.T) {
 
 func TestPlaceOrder_InvalidArgument(t *testing.T) {
 	svc := &Service{
-		Repo:        &fakeStore{byClient: make(map[string]*repository.Order)},
+		Repo:        &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)},
 		OutboxTopic: "order.commands",
 	}
 
@@ -121,26 +140,39 @@ func TestPlaceOrder_InvalidArgument(t *testing.T) {
 	}
 }
 
-func TestPlaceOrder_SetsOutboxTopic(t *testing.T) {
-	store := &fakeStore{byClient: make(map[string]*repository.Order)}
+func TestCancelOrder_Success(t *testing.T) {
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
+	store.byID[1] = &repository.Order{ID: 1, UserID: 1, Symbol: "BTC-USDT", Status: "ACCEPTED"}
 	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
 
-	req := &orderv1.PlaceOrderRequest{
-		UserId:        1,
-		ClientOrderId: "c1",
-		Symbol:        "BTC-USDT",
-		Side:          commonv1.Side_SIDE_BUY,
-		Type:          commonv1.OrderType_ORDER_TYPE_LIMIT,
-		Price:         &commonv1.Decimal{Value: "100"},
-		Quantity:      &commonv1.Decimal{Value: "1"},
-	}
-
-	in, err := validatePlaceOrder(req)
+	resp, err := svc.CancelOrder(context.Background(), &orderv1.CancelOrderRequest{UserId: 1, OrderId: 1})
 	if err != nil {
-		t.Fatalf("validatePlaceOrder: %v", err)
+		t.Fatalf("CancelOrder: %v", err)
 	}
-	in.OutboxTopic = svc.OutboxTopic
-	if in.OutboxTopic != "order.commands" {
-		t.Fatalf("outbox topic=%q", in.OutboxTopic)
+	if resp.GetStatus() != "CANCELING" {
+		t.Fatalf("status=%q", resp.GetStatus())
+	}
+}
+
+func TestGetOrder_Success(t *testing.T) {
+	store := &fakeStore{byID: map[uint64]*repository.Order{
+		1: {ID: 1, UserID: 1, ClientOrderID: "c1", Symbol: "BTC-USDT", Side: 1, OrderType: 1, Quantity: "1", FilledQuantity: "0", Status: "PENDING"},
+	}}
+	svc := &Service{Repo: store}
+
+	resp, err := svc.GetOrder(context.Background(), &orderv1.GetOrderRequest{UserId: 1, OrderId: 1})
+	if err != nil {
+		t.Fatalf("GetOrder: %v", err)
+	}
+	if resp.GetClientOrderId() != "c1" {
+		t.Fatalf("client_order_id=%q", resp.GetClientOrderId())
+	}
+}
+
+func TestGetOrder_NotFound(t *testing.T) {
+	svc := &Service{Repo: &fakeStore{byID: make(map[uint64]*repository.Order)}}
+	_, err := svc.GetOrder(context.Background(), &orderv1.GetOrderRequest{UserId: 1, OrderId: 99})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }

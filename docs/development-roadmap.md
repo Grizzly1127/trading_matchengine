@@ -283,7 +283,7 @@ make migrate-up                                     # 或 golang-migrate
 ./scripts/kafka-create-topics.sh
 ./scripts/matching.sh start                         # 消费 order.commands
 ./bin/order -config configs/order.json            # 启动 Order Service
-grpcurl -plaintext localhost:50051 ... PlaceOrder # 不必等 Gateway
+grpcurl -plaintext localhost:50051 order.v1.OrderService/PlaceOrder  # 完整示例见 order-api.md §3.2
 grpcurl -plaintext localhost:50051 ... GetOrder     # 验证 status / filled_quantity
 ```
 
@@ -333,7 +333,7 @@ curl .../v1/orders/{id}      # 查询，可见成交状态
 
 | 顺序 | 模块 | 说明 |
 |------|------|------|
-| 6.1 | Market Data Service | 深度、Ticker；写 Redis |
+| 6.1 | Market Data Service | 深度、Ticker；写 Redis；**供 Order 市价买单冻结查价**（见 [design/market-buy-freeze.md](./design/market-buy-freeze.md)） |
 | 6.2 | Push Service + Gateway WS | `depth:`、`ticker:` 频道 |
 | 6.3 | Kline Service | 消费 `trade.events` |
 | 6.4 | Index Price Service | 外部交易所 HTTP |
@@ -362,6 +362,7 @@ curl .../v1/orders/{id}      # 查询，可见成交状态
 | 模块 | 阶段 | 原因 |
 |------|------|------|
 | API Gateway | 第 5 步 | 依赖 Order gRPC |
+| 市价买单行情冻结（方案 C） | 第 6 步 6.1 之后 | 依赖 Market Data gRPC；见 [design/market-buy-freeze.md](./design/market-buy-freeze.md) |
 | Market Data / Push | 第 6 步 | 依赖 trade/match 事件 |
 | Kline / Index Price | 第 6 步 | 不阻塞撮合主链路 |
 | Shard Manager | Phase 3 | 先单 symbol |

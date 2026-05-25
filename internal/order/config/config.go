@@ -17,11 +17,17 @@ type Config struct {
 	Log            LogConfig   `json:"log"`
 }
 
-// KafkaConfig 控制 Outbox Relay 投递至 order.commands。
+// KafkaConfig 控制 Outbox Relay 与事件消费。
 type KafkaConfig struct {
-	Brokers      []string `json:"brokers"`
-	CommandTopic string   `json:"command_topic"`
-	Partition    int      `json:"partition"`
+	Brokers         []string `json:"brokers"`
+	CommandTopic    string   `json:"command_topic"`
+	MatchTopic      string   `json:"match_topic"`
+	TradeTopic      string   `json:"trade_topic"`
+	GroupID         string   `json:"group_id"`
+	Partition       int      `json:"partition"`
+	ConsumerEnabled bool     `json:"consumer_enabled"`
+	// ConsumerStartOffset：-1 从最新；0 从最早（开发回放）。
+	ConsumerStartOffset int64 `json:"consumer_start_offset"`
 }
 
 // LogConfig 控制结构化日志。
@@ -77,9 +83,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if _, ok := raw["migrate_on_start"]; !ok {
 		c.MigrateOnStart = true
 	}
-	if c.Kafka.CommandTopic == "" {
-		c.Kafka.CommandTopic = "order.commands"
-	}
+	c.applyKafkaDefaults(raw)
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}
@@ -111,6 +115,35 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 }
 
+func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
+	kafkaRaw, hasKafka := raw["kafka"]
+	if c.Kafka.CommandTopic == "" {
+		c.Kafka.CommandTopic = "order.commands"
+	}
+	if c.Kafka.MatchTopic == "" {
+		c.Kafka.MatchTopic = "match.events"
+	}
+	if c.Kafka.TradeTopic == "" {
+		c.Kafka.TradeTopic = "trade.events"
+	}
+	if c.Kafka.GroupID == "" {
+		c.Kafka.GroupID = "order-service"
+	}
+	if hasKafka {
+		var kafkaMap map[string]json.RawMessage
+		if json.Unmarshal(kafkaRaw, &kafkaMap) == nil {
+			if _, ok := kafkaMap["consumer_enabled"]; !ok {
+				c.Kafka.ConsumerEnabled = true
+			}
+			if _, ok := kafkaMap["consumer_start_offset"]; !ok && c.Kafka.ConsumerStartOffset == 0 {
+				c.Kafka.ConsumerStartOffset = -1
+			}
+		}
+	} else if c.Kafka.ConsumerStartOffset == 0 {
+		c.Kafka.ConsumerStartOffset = -1
+	}
+}
+
 func (c Config) validate() error {
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("config: database_url is required")
@@ -120,6 +153,17 @@ func (c Config) validate() error {
 	}
 	if strings.TrimSpace(c.Kafka.CommandTopic) == "" {
 		return fmt.Errorf("config: kafka.command_topic is required")
+	}
+	if c.Kafka.ConsumerEnabled {
+		if strings.TrimSpace(c.Kafka.MatchTopic) == "" {
+			return fmt.Errorf("config: kafka.match_topic is required when consumer_enabled")
+		}
+		if strings.TrimSpace(c.Kafka.TradeTopic) == "" {
+			return fmt.Errorf("config: kafka.trade_topic is required when consumer_enabled")
+		}
+		if strings.TrimSpace(c.Kafka.GroupID) == "" {
+			return fmt.Errorf("config: kafka.group_id is required when consumer_enabled")
+		}
 	}
 	return nil
 }

@@ -31,7 +31,7 @@ Order Service（`cmd/order`）对外提供 **gRPC** 接口；REST 由第 5 步 A
 
 - 撮合执行（Matching Engine）
 - 消费 `match.events` / `trade.events` 回写（4.1 后续子步骤）
-- 余额冻结（后续子步骤）
+- 余额冻结（见 §3.4）
 
 ---
 
@@ -90,7 +90,7 @@ Go import：`github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1`
 | `symbol` | string | 是 | 交易对，如 `BTC-USDT` |
 | `side` | `common.v1.Side` | 是 | `SIDE_BUY` / `SIDE_SELL` |
 | `type` | `common.v1.OrderType` | 是 | `ORDER_TYPE_LIMIT` / `ORDER_TYPE_MARKET` |
-| `price` | `common.v1.Decimal` | LIMIT 必填 | 字符串小数，如 `{ "value": "65000.50" }` |
+| `price` | `common.v1.Decimal` | LIMIT 必填；MARKET 卖不需要 | 字符串小数，如 `{ "value": "65000.50" }`；**市价买单**见 [§3.4](#34-余额冻结) |
 | `quantity` | `common.v1.Decimal` | 是 | 字符串小数，如 `{ "value": "0.01" }` |
 
 **响应 `PlaceOrderResponse`**
@@ -164,6 +164,19 @@ grpcurl -plaintext -d '{
   "idempotentHit": true
 }
 ```
+
+### 3.4 余额冻结
+
+`PlaceOrder` 在同事务内调用 `ComputeFreeze` + `lockFunds`（`account_balances.frozen`）。
+
+| 类型 | 方向 | 冻结规则（当前） |
+|------|------|------------------|
+| LIMIT | BUY | quote = `price × quantity` |
+| LIMIT | SELL | base = `quantity` |
+| MARKET | SELL | base = `quantity` |
+| MARKET | BUY | **必须**传 `price` 作临时保护价；否则 `InvalidArgument` |
+
+**市价买单（目标方案，未实现）**：按 Market Data 返回的 **Best Ask / Mark Price** 估算，加滑点缓冲后冻结 quote；用户无需填 `price`。详见 [design/market-buy-freeze.md](./design/market-buy-freeze.md)（**方案 C**），在 **第 6 步 Market Data Service** 就绪后实现。
 
 ---
 
@@ -240,3 +253,4 @@ grpcurl -plaintext -d '{
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | 1.0 | 2026-05-24 | 初稿：PlaceOrder gRPC + 直连 Kafka（4.1） |
+| 1.1 | 2026-05-24 | §3.4 余额冻结；市价买方案 C 见 design/market-buy-freeze.md |

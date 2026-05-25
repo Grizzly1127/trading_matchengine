@@ -139,6 +139,14 @@ VALUES ($1, $2, $3)`
 		return nil, fmt.Errorf("insert idempotency: %w", err)
 	}
 
+	freeze, err := ComputeFreeze(in.Side, in.Symbol, in.Price, in.Quantity)
+	if err != nil {
+		return nil, fmt.Errorf("compute freeze: %w", err)
+	}
+	if err := lockFunds(ctx, tx, in.UserID, freeze.Asset, freeze.Amount); err != nil {
+		return nil, err
+	}
+
 	if err := insertNewOrderOutbox(ctx, tx, order, in.OutboxTopic); err != nil {
 		return nil, err
 	}

@@ -7,9 +7,11 @@ option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1;
 import "google/protobuf/timestamp.proto";
 import "common/v1/types.proto";
 
-// OrderService 订单服务（第 4 步起逐步实现 RPC）。
+// OrderService 订单服务。
 service OrderService {
   rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
 }
 
 message PlaceOrderRequest {
@@ -28,6 +30,35 @@ message PlaceOrderResponse {
   string symbol = 3;
   string status = 4;
   google.protobuf.Timestamp created_at = 5;
-  // idempotent_hit 为 true 表示命中 client_order_id 幂等，返回已有订单。
   bool idempotent_hit = 6;
+}
+
+message CancelOrderRequest {
+  uint64 user_id = 1;
+  uint64 order_id = 2;
+}
+
+message CancelOrderResponse {
+  uint64 order_id = 1;
+  string symbol = 2;
+  string status = 3;
+}
+
+message GetOrderRequest {
+  uint64 user_id = 1;
+  uint64 order_id = 2;
+}
+
+message GetOrderResponse {
+  uint64 order_id = 1;
+  string client_order_id = 2;
+  string symbol = 3;
+  common.v1.Side side = 4;
+  common.v1.OrderType type = 5;
+  common.v1.Decimal price = 6;
+  common.v1.Decimal quantity = 7;
+  common.v1.Decimal filled_quantity = 8;
+  string status = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
 }

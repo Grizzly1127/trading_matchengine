@@ -1,7 +1,7 @@
 MODULE := github.com/tradingmatchengine/trading_matchengine
 BIN_DIR := bin
 
-.PHONY: help test test-race cover lint tidy build clean
+.PHONY: help test test-race cover lint tidy build clean migrate-up
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make cover       - test coverage report"
 	@echo "  make tidy        - go mod tidy"
 	@echo "  make build       - build cmd binaries (when added)"
+	@echo "  make migrate-up  - apply SQL migrations (requires psql)"
 	@echo "  make clean       - remove bin/"
 
 test:
@@ -33,6 +34,9 @@ build:
 
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html
+
+migrate-up:
+	@bash scripts/migrate-up.sh
 
 # Optional: golangci-lint (install separately)
 lint:

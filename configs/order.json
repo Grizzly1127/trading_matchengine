@@ -6,7 +6,12 @@
   "kafka": {
     "brokers": ["localhost:9092"],
     "command_topic": "order.commands",
-    "partition": 0
+    "match_topic": "match.events",
+    "trade_topic": "trade.events",
+    "group_id": "order-service",
+    "partition": 0,
+    "consumer_enabled": true,
+    "consumer_start_offset": -1
   },
   "log": {
     "level": "info",
