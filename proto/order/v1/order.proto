@@ -12,6 +12,7 @@ service OrderService {
   rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
   rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
   rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
 }
 
 message PlaceOrderRequest {
@@ -50,6 +51,26 @@ message GetOrderRequest {
 }
 
 message GetOrderResponse {
+  OrderInfo order = 1;
+}
+
+message ListOrdersRequest {
+  uint64 user_id = 1;
+  string symbol = 2;
+  common.v1.Side side = 3;
+  common.v1.OrderType type = 4;
+  string status = 5;
+  google.protobuf.Timestamp created_at_from = 6;
+  google.protobuf.Timestamp created_at_to = 7;
+  int32 page = 8;
+  int32 page_size = 9;
+}
+
+message ListOrdersResponse {
+  repeated OrderInfo orders = 1;
+}
+
+message OrderInfo {
   uint64 order_id = 1;
   string client_order_id = 2;
   string symbol = 3;

@@ -9,12 +9,23 @@ import (
 
 // Config 是 order 进程启动配置。
 type Config struct {
-	GRPCListen     string      `json:"grpc_listen"`
-	DatabaseURL    string      `json:"database_url"`
-	MigrateOnStart bool        `json:"migrate_on_start"`
-	DefaultSymbol  string      `json:"default_symbol"`
-	Kafka          KafkaConfig `json:"kafka"`
-	Log            LogConfig   `json:"log"`
+	GRPCListen     string            `json:"grpc_listen"`
+	DatabaseURL    string            `json:"database_url"`
+	MigrateOnStart bool              `json:"migrate_on_start"`
+	DefaultSymbol  string            `json:"default_symbol"`
+	Kafka          KafkaConfig       `json:"kafka"`
+	Reconciler     ReconcilerConfig  `json:"reconciler"`
+	Log            LogConfig         `json:"log"`
+}
+
+// ReconcilerConfig 超时补偿 scheduler（§4.5）。
+type ReconcilerConfig struct {
+	Enabled                     bool `json:"enabled"`
+	IntervalSeconds             int  `json:"interval_seconds"`
+	BatchSize                   int  `json:"batch_size"`
+	PendingAcceptTimeoutSeconds int  `json:"pending_accept_timeout_seconds"`
+	CancelConfirmTimeoutSeconds int  `json:"cancel_confirm_timeout_seconds"`
+	OutboxStaleWarnSeconds      int  `json:"outbox_stale_warn_seconds"`
 }
 
 // KafkaConfig 控制 Outbox Relay 与事件消费。
@@ -84,6 +95,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		c.MigrateOnStart = true
 	}
 	c.applyKafkaDefaults(raw)
+	c.applyReconcilerDefaults(raw)
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}
@@ -141,6 +153,36 @@ func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
 		}
 	} else if c.Kafka.ConsumerStartOffset == 0 {
 		c.Kafka.ConsumerStartOffset = -1
+	}
+}
+
+func (c *Config) applyReconcilerDefaults(raw map[string]json.RawMessage) {
+	reconcilerRaw, has := raw["reconciler"]
+	if !has {
+		c.Reconciler.Enabled = true
+	}
+	if c.Reconciler.IntervalSeconds <= 0 {
+		c.Reconciler.IntervalSeconds = 60
+	}
+	if c.Reconciler.BatchSize <= 0 {
+		c.Reconciler.BatchSize = 50
+	}
+	if c.Reconciler.PendingAcceptTimeoutSeconds <= 0 {
+		c.Reconciler.PendingAcceptTimeoutSeconds = 60
+	}
+	if c.Reconciler.CancelConfirmTimeoutSeconds <= 0 {
+		c.Reconciler.CancelConfirmTimeoutSeconds = 30
+	}
+	if c.Reconciler.OutboxStaleWarnSeconds <= 0 {
+		c.Reconciler.OutboxStaleWarnSeconds = 30
+	}
+	if has {
+		var m map[string]json.RawMessage
+		if json.Unmarshal(reconcilerRaw, &m) == nil {
+			if _, ok := m["enabled"]; !ok {
+				c.Reconciler.Enabled = true
+			}
+		}
 	}
 }
 

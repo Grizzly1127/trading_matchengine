@@ -29,6 +29,7 @@ type OrderStore interface {
 	InsertPending(ctx context.Context, in repository.InsertPendingInput) (*repository.Order, error)
 	GetOrderByUser(ctx context.Context, userID, orderID uint64) (*repository.Order, error)
 	BeginCancel(ctx context.Context, userID, orderID uint64, outboxTopic string) (*repository.Order, error)
+	ListOrders(ctx context.Context, filter repository.ListOrdersFilter) ([]repository.Order, error)
 }
 
 // Service 订单业务逻辑。
@@ -129,6 +130,88 @@ func (s *Service) GetOrder(ctx context.Context, req *orderv1.GetOrderRequest) (*
 	return toGetOrderResponse(order), nil
 }
 
+// ListOrders 查询订单列表（筛选条件均可选，仅 user_id 必填）。
+func (s *Service) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest) (*orderv1.ListOrdersResponse, error) {
+	if s == nil || s.Repo == nil {
+		return nil, fmt.Errorf("order service not configured")
+	}
+	if req == nil {
+		return nil, fmt.Errorf("%w: request is nil", ErrInvalidArgument)
+	}
+	if req.GetUserId() == 0 {
+		return nil, fmt.Errorf("%w: user_id is required", ErrInvalidArgument)
+	}
+
+	filter, err := buildListOrdersFilter(req)
+	if err != nil {
+		return nil, err
+	}
+
+	orders, err := s.Repo.ListOrders(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]*orderv1.OrderInfo, 0, len(orders))
+	for i := range orders {
+		out = append(out, toOrderInfoPB(&orders[i]))
+	}
+	return &orderv1.ListOrdersResponse{Orders: out}, nil
+}
+
+func buildListOrdersFilter(req *orderv1.ListOrdersRequest) (repository.ListOrdersFilter, error) {
+	filter := repository.ListOrdersFilter{
+		UserID: req.GetUserId(),
+		Symbol: strings.TrimSpace(req.GetSymbol()),
+		Status: strings.TrimSpace(strings.ToUpper(req.GetStatus())),
+		Page:   int(req.GetPage()),
+		PageSize: int(req.GetPageSize()),
+	}
+
+	side := req.GetSide()
+	if side != commonv1.Side_SIDE_UNSPECIFIED {
+		if side != commonv1.Side_SIDE_BUY && side != commonv1.Side_SIDE_SELL {
+			return filter, fmt.Errorf("%w: invalid side filter", ErrInvalidArgument)
+		}
+		filter.Side = int16(side)
+	}
+
+	typ := req.GetType()
+	if typ != commonv1.OrderType_ORDER_TYPE_UNSPECIFIED {
+		if typ != commonv1.OrderType_ORDER_TYPE_LIMIT && typ != commonv1.OrderType_ORDER_TYPE_MARKET {
+			return filter, fmt.Errorf("%w: invalid type filter", ErrInvalidArgument)
+		}
+		filter.OrderType = int16(typ)
+	}
+
+	if filter.Status != "" && !isValidOrderStatus(filter.Status) {
+		return filter, fmt.Errorf("%w: invalid status filter", ErrInvalidArgument)
+	}
+
+	if req.GetCreatedAtFrom() != nil {
+		t := req.GetCreatedAtFrom().AsTime()
+		filter.CreatedAtFrom = &t
+	}
+	if req.GetCreatedAtTo() != nil {
+		t := req.GetCreatedAtTo().AsTime()
+		filter.CreatedAtTo = &t
+	}
+	if filter.CreatedAtFrom != nil && filter.CreatedAtTo != nil && filter.CreatedAtFrom.After(*filter.CreatedAtTo) {
+		return filter, fmt.Errorf("%w: created_at_from must be before created_at_to", ErrInvalidArgument)
+	}
+
+	return filter, nil
+}
+
+func isValidOrderStatus(status string) bool {
+	switch status {
+	case "PENDING", "ACCEPTED", "PARTIAL", "CANCELING", "FILLED", "CANCELED", "REJECTED":
+		return true
+	default:
+		return false
+	}
+}
+
 func validatePlaceOrder(req *orderv1.PlaceOrderRequest) (repository.InsertPendingInput, error) {
 	if req.GetUserId() == 0 {
 		return repository.InsertPendingInput{}, fmt.Errorf("%w: user_id is required", ErrInvalidArgument)
@@ -200,20 +283,26 @@ func toPlaceOrderResponse(order *repository.Order, idempotentHit bool) *orderv1.
 }
 
 func toGetOrderResponse(order *repository.Order) *orderv1.GetOrderResponse {
-	resp := &orderv1.GetOrderResponse{
-		OrderId:       order.ID,
-		ClientOrderId: order.ClientOrderID,
-		Symbol:        order.Symbol,
-		Side:          commonv1.Side(order.Side),
-		Type:          commonv1.OrderType(order.OrderType),
-		Quantity:      &commonv1.Decimal{Value: order.Quantity},
+	return &orderv1.GetOrderResponse{
+		Order: toOrderInfoPB(order),
+	}
+}
+
+func toOrderInfoPB(order *repository.Order) *orderv1.OrderInfo {
+	orderInfo := &orderv1.OrderInfo{
+		OrderId:        order.ID,
+		ClientOrderId:  order.ClientOrderID,
+		Symbol:         order.Symbol,
+		Side:           commonv1.Side(order.Side),
+		Type:           commonv1.OrderType(order.OrderType),
+		Quantity:       &commonv1.Decimal{Value: order.Quantity},
 		FilledQuantity: &commonv1.Decimal{Value: order.FilledQuantity},
-		Status:        order.Status,
-		CreatedAt:     timestamppb.New(order.CreatedAt),
-		UpdatedAt:     timestamppb.New(order.UpdatedAt),
+		Status:         order.Status,
+		CreatedAt:      timestamppb.New(order.CreatedAt),
+		UpdatedAt:      timestamppb.New(order.UpdatedAt),
 	}
 	if order.Price != nil {
-		resp.Price = &commonv1.Decimal{Value: *order.Price}
+		orderInfo.Price = &commonv1.Decimal{Value: *order.Price}
 	}
-	return resp
+	return orderInfo
 }

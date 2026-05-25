@@ -17,6 +17,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/order/consumer"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/handler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/reconciler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/service"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
@@ -101,6 +102,13 @@ func main() {
 		Config: outbox.RelayConfig{Partition: cfg.Kafka.Partition},
 	}
 	go relay.Run(ctx)
+
+	reconcileSched := &reconciler.Scheduler{
+		Store:  repo,
+		Log:    log.With().Str("component", "reconciler").Logger(),
+		Config: cfg.ReconcilerRuntime(cfg.Kafka.CommandTopic),
+	}
+	go reconcileSched.Run(ctx)
 
 	if cfg.Kafka.ConsumerEnabled {
 		startEventConsumers(ctx, log, cfg, repo)

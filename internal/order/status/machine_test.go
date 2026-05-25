@@ -18,6 +18,7 @@ func TestCanTransition(t *testing.T) {
 		{Accepted, Partial, true},
 		{Partial, Partial, true},
 		{Partial, Filled, true},
+		{Pending, Rejected, true},
 		{Pending, Canceling, true},
 		{Accepted, Canceling, true},
 		{Partial, Canceling, true},

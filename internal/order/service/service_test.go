@@ -52,6 +52,29 @@ func (f *fakeStore) GetOrderByUser(_ context.Context, userID, orderID uint64) (*
 	return o, nil
 }
 
+func (f *fakeStore) ListOrders(_ context.Context, filter repository.ListOrdersFilter) ([]repository.Order, error) {
+	var out []repository.Order
+	for _, o := range f.byID {
+		if o.UserID != filter.UserID {
+			continue
+		}
+		if filter.Symbol != "" && o.Symbol != filter.Symbol {
+			continue
+		}
+		if filter.Side != 0 && o.Side != filter.Side {
+			continue
+		}
+		if filter.OrderType != 0 && o.OrderType != filter.OrderType {
+			continue
+		}
+		if filter.Status != "" && o.Status != filter.Status {
+			continue
+		}
+		out = append(out, *o)
+	}
+	return out, nil
+}
+
 func (f *fakeStore) BeginCancel(_ context.Context, userID, orderID uint64, _ string) (*repository.Order, error) {
 	o, ok := f.byID[orderID]
 	if !ok || o.UserID != userID {
@@ -164,8 +187,8 @@ func TestGetOrder_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrder: %v", err)
 	}
-	if resp.GetClientOrderId() != "c1" {
-		t.Fatalf("client_order_id=%q", resp.GetClientOrderId())
+	if resp.GetOrder().GetClientOrderId() != "c1" {
+		t.Fatalf("client_order_id=%q", resp.GetOrder().GetClientOrderId())
 	}
 }
 

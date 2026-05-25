@@ -38,6 +38,13 @@ func (s *Server) GetOrder(ctx context.Context, req *orderv1.GetOrderRequest) (*o
 	})
 }
 
+// ListOrders 查询订单列表。
+func (s *Server) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest) (*orderv1.ListOrdersResponse, error) {
+	return invoke(s, req, func() (*orderv1.ListOrdersResponse, error) {
+		return s.Svc.ListOrders(ctx, req)
+	})
+}
+
 func invoke[T any](s *Server, req any, fn func() (T, error)) (T, error) {
 	var zero T
 	if s == nil || s.Svc == nil {

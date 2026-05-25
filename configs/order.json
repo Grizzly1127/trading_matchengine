@@ -13,6 +13,14 @@
     "consumer_enabled": true,
     "consumer_start_offset": -1
   },
+  "reconciler": {
+    "enabled": true,
+    "interval_seconds": 60,
+    "batch_size": 50,
+    "pending_accept_timeout_seconds": 60,
+    "cancel_confirm_timeout_seconds": 30,
+    "outbox_stale_warn_seconds": 30
+  },
   "log": {
     "level": "info",
     "dev": true,

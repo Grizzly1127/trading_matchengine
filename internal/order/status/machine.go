@@ -78,6 +78,8 @@ func AllowedFromStatuses(target string) []string {
 		return []string{Pending, Accepted, Partial}
 	case Canceled:
 		return []string{Pending, Accepted, Partial, Canceling}
+	case Rejected:
+		return []string{Pending}
 	default:
 		return nil
 	}

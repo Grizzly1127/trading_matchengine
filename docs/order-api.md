@@ -1,37 +1,38 @@
 # Order Service API Documentation
 
-**Version**: 1.0  
-**Date**: 2026-05-24  
-**Status**: 与当前代码一致（第 4 步 4.1）  
+**Version**: 1.2  
+**Date**: 2026-05-25  
+**Status**: 与当前代码一致（第 4 步）  
 **关联**: [development-roadmap.md](./development-roadmap.md) · [matching-api.md](./matching-api.md) · [architecture-spec.md](./architecture-spec.md)
 
-Order Service（`cmd/order`）对外提供 **gRPC** 接口；REST 由第 5 步 API Gateway 封装。与 Matching Engine 的异步契约见 [matching-api.md §4](./matching-api.md#4-入站消息ordercommands)。
+Order Service（`cmd/order`）对外提供 **gRPC**；REST 由第 5 步 API Gateway 封装。异步契约见 [matching-api.md §4](./matching-api.md#4-入站消息ordercommands)。
 
 ---
 
 ## 1. 服务边界
 
 ```text
-  Client / grpcurl          Order Service              Matching Engine
-        │                        │                           │
-        │  gRPC PlaceOrder         │  order.commands (Kafka)   │
-        └───────────────────────►│──────────────────────────►│
-                                 │  PostgreSQL (orders)      │
-                                 │  （4.1 无 Outbox）         │
+  Client / grpcurl          Order Service                    Matching Engine
+        │                        │                                │
+        │  PlaceOrder/Cancel      │  Outbox Relay → order.commands │
+        └───────────────────────►│───────────────────────────────►│
+                                 │  PostgreSQL                     │
+                                 │  ← match.events / trade.events │
+                                 │  reconciler（超时补偿）          │
 ```
 
-**职责（4.1）**
+**职责**
 
-- 接收下单请求，校验参数
-- `client_order_id` 幂等（DB 唯一索引）
-- 写入 `orders`（`status=PENDING`）
-- **直接**发布 `OrderCommandEnvelope` 到 Kafka（尚未 Transactional Outbox）
+- 下单 / 撤单 / 查单 / 列表；`client_order_id` 幂等
+- 同事务：冻结余额 + `orders` + `order_outbox`（Transactional Outbox）
+- 后台 Relay 投递 Kafka；消费撮合回写状态与成交结算
+- 超时补偿：超时 `PENDING` 拒单 + Cancel Outbox；`CANCELING` 重发撤单
+- 资产查询与联调充值（`BalanceService`）
 
 **不负责**
 
 - 撮合执行（Matching Engine）
-- 消费 `match.events` / `trade.events` 回写（4.1 后续子步骤）
-- 余额冻结（见 §3.4）
+- 行情与市价买冻结方案 C（见 [design/market-buy-freeze.md](./design/market-buy-freeze.md)）
 
 ---
 
@@ -53,84 +54,64 @@ docker compose -f deploy/docker-compose.yml up -d
 
 ### 2.2 配置文件 `configs/order.json`
 
-| 字段 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `grpc_listen` | string | `:50051` | gRPC 监听地址 |
-| `database_url` | string | — | PostgreSQL DSN |
-| `migrate_on_start` | bool | `true` | 启动时执行内嵌 migration |
-| `default_symbol` | string | `BTC-USDT` | 文档/联调默认交易对 |
-| `kafka.brokers` | string[] | — | 如 `["localhost:9092"]` |
-| `kafka.command_topic` | string | `order.commands` | 命令 topic |
-| `kafka.partition` | int | `0` | 开发环境固定分区（与 matching 一致） |
-| `log.*` | object | — | 同 Matching，见 matching-api |
+| 字段 | 说明 |
+|------|------|
+| `grpc_listen` | gRPC 监听，默认 `:50051` |
+| `database_url` | PostgreSQL DSN（开发环境注意端口，避免与本机 5432 冲突） |
+| `migrate_on_start` | 启动时执行内嵌 migration（`internal/order/repository/migrations`） |
+| `kafka.command_topic` | 默认 `order.commands` |
+| `kafka.match_topic` / `trade_topic` | 消费回写 |
+| `kafka.consumer_enabled` | 是否启动 match/trade 消费者 |
+| `kafka.partition` | 开发环境固定 `0` |
+| `reconciler.*` | 超时补偿，见 §5 |
 
 ### 2.3 优雅退出
 
 - 信号：`SIGINT`、`SIGTERM`
-- 行为：停止 gRPC、关闭 DB 连接池与 Kafka writer
+- 停止 gRPC、Outbox Relay、reconciler、Kafka consumer/writer、DB 连接池
 
 ---
 
-## 3. gRPC 接口
+## 3. gRPC：`OrderService`
 
-Proto：`proto/order/v1/order.proto`  
-Package：`order.v1`  
-Go import：`github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1`
+Proto：`proto/order/v1/order.proto`
 
 ### 3.1 `PlaceOrder`
 
-**RPC:** `order.v1.OrderService/PlaceOrder`
+同事务：幂等 → 冻结 → `orders(PENDING)` → `order_outbox`。**不**在请求线程直接发 Kafka。
 
-**请求 `PlaceOrderRequest`**
+- 幂等命中：返回已有订单，`idempotent_hit=true`，不重复写 Outbox
+- 成功：保证 DB 已提交；撮合命令由 Relay 异步投递
+- 余额不足：`FailedPrecondition`
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `user_id` | uint64 | 是 | 用户 ID（4.1 联调可传固定值，如 `1`） |
-| `client_order_id` | string | 是 | 幂等键，最长 64 |
-| `symbol` | string | 是 | 交易对，如 `BTC-USDT` |
-| `side` | `common.v1.Side` | 是 | `SIDE_BUY` / `SIDE_SELL` |
-| `type` | `common.v1.OrderType` | 是 | `ORDER_TYPE_LIMIT` / `ORDER_TYPE_MARKET` |
-| `price` | `common.v1.Decimal` | LIMIT 必填；MARKET 卖不需要 | 字符串小数，如 `{ "value": "65000.50" }`；**市价买单**见 [§3.4](#34-余额冻结) |
-| `quantity` | `common.v1.Decimal` | 是 | 字符串小数，如 `{ "value": "0.01" }` |
+### 3.2 `CancelOrder`
 
-**响应 `PlaceOrderResponse`**
+可撤单状态：`PENDING` / `ACCEPTED` / `PARTIAL` → `CANCELING` + 撤单 Outbox。
 
-| 字段 | 类型 | 说明 |
+### 3.3 `GetOrder` / `ListOrders`
+
+- `GetOrder`：`user_id` + `order_id`，响应 `OrderInfo`
+- `ListOrders`：仅 `user_id` 必填；`symbol` / `side` / `type` / `status` / 时间范围可选；默认 `page=1`、`page_size=20`（最大 100）
+
+### 3.4 余额冻结（下单）
+
+| 类型 | 方向 | 规则 |
 |------|------|------|
-| `order_id` | uint64 | 系统订单号（PostgreSQL 发号） |
-| `client_order_id` | string | 回显 |
-| `symbol` | string | 交易对 |
-| `status` | string | 初始为 `PENDING` |
-| `created_at` | Timestamp | 创建时间 |
-| `idempotent_hit` | bool | `true` 表示命中幂等，返回已有订单 |
+| LIMIT | BUY/SELL | `price×qty` / `qty` |
+| MARKET | SELL | `qty`（base） |
+| MARKET | BUY | 暂需 `price` 作保护价；方案 C 见 design 文档 |
 
-**语义**
+### 3.5 grpcurl 示例
 
-- 成功：订单已落库；Kafka 命令已发出（4.1 **不保证** Outbox 级可靠投递）
-- 幂等：相同 `user_id` + `client_order_id` 返回同一 `order_id`，**不**重复发 Kafka
-- **不保证**已撮合或已成交；需后续 `GetOrder` 或消费回写（4.1 尚未实现查询 RPC）
-
-**gRPC 状态码**
-
-| code | 场景 |
-|------|------|
-| `OK` | 成功或幂等命中 |
-| `InvalidArgument` | 参数校验失败 |
-| `Internal` | DB / Kafka 错误 |
-
-### 3.2 grpcurl 示例
-
-列出服务（需安装 [grpcurl](https://github.com/fullstorydev/grpcurl)）：
+需指定 proto（未开 gRPC reflection）：
 
 ```bash
-grpcurl -plaintext localhost:50051 list
-grpcurl -plaintext localhost:50051 describe order.v1.OrderService
-```
+export PATH="$PATH:$(go env GOPATH)/bin"
+PROTO_ARGS="-import-path proto -proto proto/common/v1/types.proto -proto proto/order/v1/order.proto"
 
-限价买单：
+grpcurl -plaintext $PROTO_ARGS localhost:50051 list
 
-```bash
-grpcurl -plaintext -d '{
+grpcurl -plaintext $PROTO_ARGS -d '{
   "user_id": 1,
   "client_order_id": "demo-001",
   "symbol": "BTC-USDT",
@@ -139,112 +120,105 @@ grpcurl -plaintext -d '{
   "price": { "value": "100" },
   "quantity": { "value": "1" }
 }' localhost:50051 order.v1.OrderService/PlaceOrder
+
+grpcurl -plaintext $PROTO_ARGS -d '{"user_id":1,"order_id":1}' \
+  localhost:50051 order.v1.OrderService/GetOrder
+
+grpcurl -plaintext $PROTO_ARGS -d '{"user_id":1}' \
+  localhost:50051 order.v1.OrderService/ListOrders
 ```
 
-预期响应（字段随实际变化）：
+联调前先充值（`BalanceService`）：
 
-```json
-{
-  "orderId": "1",
-  "clientOrderId": "demo-001",
-  "symbol": "BTC-USDT",
-  "status": "PENDING",
-  "createdAt": "2026-05-24T12:00:00Z",
-  "idempotentHit": false
-}
+```bash
+grpcurl -plaintext \
+  -import-path proto \
+  -proto proto/common/v1/types.proto \
+  -proto proto/order/v1/balance.proto \
+  -d '{"user_id":1,"asset":"USDT","business":"deposit","business_id":1001,"change":{"value":"10000"}}' \
+  localhost:50051 order.v1.BalanceService/UpdateBalance
 ```
-
-重复相同 `client_order_id`：
-
-```json
-{
-  "orderId": "1",
-  "clientOrderId": "demo-001",
-  "status": "PENDING",
-  "idempotentHit": true
-}
-```
-
-### 3.4 余额冻结
-
-`PlaceOrder` 在同事务内调用 `ComputeFreeze` + `lockFunds`（`account_balances.frozen`）。
-
-| 类型 | 方向 | 冻结规则（当前） |
-|------|------|------------------|
-| LIMIT | BUY | quote = `price × quantity` |
-| LIMIT | SELL | base = `quantity` |
-| MARKET | SELL | base = `quantity` |
-| MARKET | BUY | **必须**传 `price` 作临时保护价；否则 `InvalidArgument` |
-
-**市价买单（目标方案，未实现）**：按 Market Data 返回的 **Best Ask / Mark Price** 估算，加滑点缓冲后冻结 quote；用户无需填 `price`。详见 [design/market-buy-freeze.md](./design/market-buy-freeze.md)（**方案 C**），在 **第 6 步 Market Data Service** 就绪后实现。
 
 ---
 
-## 4. 下游 Kafka：`order.commands`
+## 4. gRPC：`BalanceService`
 
-PlaceOrder 成功后（非幂等命中），Order Service 发布：
+Proto：`proto/order/v1/balance.proto`
+
+| RPC | 说明 |
+|-----|------|
+| `GetBalance` | `user_id` + `asset` |
+| `ListBalances` | `user_id` 下全部资产 |
+| `UpdateBalance` | 调账/充值；幂等键 `business` + `business_id` |
+
+---
+
+## 5. 下游 Kafka 与后台任务
+
+### 5.1 Outbox → `order.commands`
 
 | 项 | 值 |
 |----|-----|
-| Topic | `order.commands`（可配置） |
-| Key | `symbol` 字符串 |
-| Value | `proto.Marshal(OrderCommandEnvelope)` |
-| 内层命令 | `NewOrderCommand{ command_id: order_id, order: ... }` |
+| 投递方 | `internal/order/outbox/relay.go`（独立 goroutine） |
+| Value | `OrderCommandEnvelope`（`command_id` = `order_outbox.id`） |
+| Key | `symbol` |
 
-**必须与 Matching 一致**，详见 [matching-api.md §4](./matching-api.md#4-入站消息ordercommands)。
+### 5.2 入站事件
 
-**注意（4.1 局限）**：DB 提交与 Kafka 发送**不在同一事务**；Kafka 失败会导致 DB 有单但撮合未收到命令。第 4 步 4.2 将改为 Transactional Outbox。
+| Topic | 作用 |
+|-------|------|
+| `match.events` | 更新 `orders.status`、释放冻结等 |
+| `trade.events` | 写 `trades`、结算 `account_balances` |
+
+### 5.3 Reconciler（§4.5）
+
+| 场景 | 动作 |
+|------|------|
+| `PENDING` + 已发 NewOrder + 超时 | `REJECTED` + 解冻 + **Cancel Outbox** |
+| `CANCELING` + 无待发撤单 Outbox + 超时 | 补写 Cancel Outbox |
+| 长期未发布 Outbox | WARN 日志（仍由 Relay 重试） |
+
+配置段：`reconciler` in `configs/order.json`。
 
 ---
 
-## 5. 数据库（4.1）
+## 6. 数据库
 
-启动时若 `migrate_on_start=true`，执行 `migrations/001_create_orders.up.sql`（内嵌于 `internal/order/repository`）。
+内嵌迁移 `001`～`007`（与根目录 `migrations/` 一致）。
 
 | 表 | 说明 |
 |----|------|
-| `orders` | 订单主表，`status` 初始 `PENDING` |
-| `client_order_idempotency` | `(user_id, client_order_id)` 主键，幂等 |
+| `orders` | 订单主表 + 乐观锁 `version` |
+| `order_outbox` | Transactional Outbox |
+| `client_order_idempotency` | 下单幂等 |
+| `account_balances` | 余额 + 冻结 |
+| `trades` | 成交幂等（`trade_id`） |
+| `processed_match_events` | match 消费幂等 |
+| `balance_adjust_idempotency` | 调账幂等 |
+
+索引：`idx_orders_user_status`、`idx_orders_user_id_desc`（ListOrders）等。
 
 ---
 
-## 6. 端到端联调（4.1）
+## 7. 端到端联调清单
 
-```bash
-# 1. 基础设施
-docker compose -f deploy/docker-compose.yml up -d
-./scripts/kafka-create-topics.sh
-
-# 2. Matching（Kafka 模式）
-./scripts/matching.sh start --build
-
-# 3. Order Service
-make build
-./bin/order -config configs/order.json
-
-# 4. 下单
-grpcurl -plaintext -d '{
-  "user_id": 1,
-  "client_order_id": "e2e-001",
-  "symbol": "BTC-USDT",
-  "side": "SIDE_SELL",
-  "type": "ORDER_TYPE_LIMIT",
-  "price": { "value": "100" },
-  "quantity": { "value": "1" }
-}' localhost:50051 order.v1.OrderService/PlaceOrder
-
-# 5. 验证 Matching 日志 / WAL 中有该 order_id
-```
+1. 基础设施：compose + `kafka-create-topics.sh`
+2. `./scripts/matching.sh start --build`
+3. `./bin/order -config configs/order.json`
+4. `UpdateBalance` 充值 → `PlaceOrder` → 查 Matching / `GetOrder` 状态
+5. 撤单：`CancelOrder` → 终态 `CANCELED`
+6. （可选）停 Order 再启，确认未发布 Outbox 仍会投递
 
 ---
 
-## 7. 后续 RPC（尚未实现）
+## 8. 尚未实现
 
-| RPC | 计划步骤 |
-|-----|----------|
-| `CancelOrder` | 4.1 后续 / 4.2 |
-| `GetOrder` | 4.1 子步骤 6 |
-| `ListOrders` | 可选，第 5 步 Gateway |
+| 项 | 阶段 |
+|----|------|
+| API Gateway REST | 第 5 步 |
+| 市价买行情冻结（方案 C） | 第 6 步 + Market Data |
+| Matching 对账 gRPC | Phase 2+ |
+| testcontainers 集成测试 | 第 4 步收尾可选 |
 
 ---
 
@@ -252,5 +226,6 @@ grpcurl -plaintext -d '{
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 1.0 | 2026-05-24 | 初稿：PlaceOrder gRPC + 直连 Kafka（4.1） |
-| 1.1 | 2026-05-24 | §3.4 余额冻结；市价买方案 C 见 design/market-buy-freeze.md |
+| 1.0 | 2026-05-24 | 初稿（4.1 直连 Kafka） |
+| 1.1 | 2026-05-24 | 余额冻结与市价买方案 C 文档 |
+| 1.2 | 2026-05-25 | 对齐第 4 步完整实现：Outbox、消费者、ListOrders、Balance、reconciler |

@@ -216,13 +216,14 @@ make test
 | 路径 | 职责 |
 |------|------|
 | `cmd/order/main.go` | 进程入口、配置、优雅退出 |
-| `proto/order/v1/order.proto` | gRPC 接口定义（`PlaceOrder` / `CancelOrder` / `GetOrder`） |
+| `proto/order/v1/order.proto`、`balance.proto` | gRPC：订单 + 资产 |
 | `internal/order/config/` | DB、Kafka、gRPC 端口等配置 |
 | `internal/order/handler/` | gRPC server 实现 |
 | `internal/order/service/` | 下单/撤单/查询业务逻辑、状态机 |
 | `internal/order/repository/` | PostgreSQL CRUD |
 | `internal/order/outbox/` | 同事务写入 + Relay 投递 |
 | `internal/order/consumer/` | 消费 `match.events`（状态）与 `trade.events`（成交） |
+| `internal/order/reconciler/` | 超时补偿 scheduler（§4.5） |
 | `configs/order.json` | 联调配置（对标 `matching.kafka.json`） |
 | `migrations/` | 见下表 |
 | `pkg/kafka/` | **复用**第 3 步已有封装（Outbox Relay + consumer） |
@@ -237,6 +238,9 @@ make test
 | `client_order_idempotency` | `client_order_id` 唯一索引，下单幂等 |
 | `account_balances` | 余额 + 冻结 |
 | `trades` | 成交记录（`trade_id` 唯一约束幂等） |
+| `processed_match_events` | match 事件幂等 |
+| `balance_adjust_idempotency` | 调账幂等 |
+| `007` 索引 | `ListOrders` 列表查询 |
 
 **建议子顺序**
 
@@ -248,8 +252,8 @@ make test
    - 撤单：`PENDING`/`ACCEPTED`/`PARTIAL` → `CANCELING` → `CANCELED`
 4. 消费 **`match.events`** 更新订单状态（含 maker 侧被动成交流）
 5. 消费 **`trade.events`** 幂等写 `trades` + 余额扣减/解冻
-6. 实现 `GetOrder`（grpcurl 查单，供第 5 步 Gateway 复用）
-7. （可选）超时补偿 scheduler（§4.5）、`ListOrders`
+6. 实现 `GetOrder`（grpcurl 查单，供第 5 步 Gateway 复用）— **已完成**
+7. （可选）超时补偿 scheduler（§4.5）、`ListOrders` — **已完成**（拒单时同步写 Cancel Outbox）
 
 **Outbox → Kafka 契约（必须与 Matching 一致）**
 
@@ -259,13 +263,17 @@ make test
 
 **任务清单**
 
-- [ ] `PlaceOrder` / `CancelOrder` / `GetOrder` gRPC
-- [ ] 单事务：幂等 + 余额冻结 + `orders` INSERT + `order_outbox` INSERT
-- [ ] Outbox Relay → `order.commands`（`OrderCommandEnvelope` + `acks=all`）
-- [ ] 消费 `match.events`：按 `event_type` 更新 `orders.status`（含 `ACCEPTED`）
-- [ ] 消费 `trade.events`：按 `trade_id` 幂等写 `trades` + 更新 `account_balances`
-- [ ] `client_order_id`（string）幂等；`order_id`（uint64）由 Order Service 发号
-- [ ] Outbox Relay 与状态机迁移有集成测试（可用 testcontainers 或内存 PG）
+- [x] `PlaceOrder` / `CancelOrder` / `GetOrder` / `ListOrders` gRPC
+- [x] `BalanceService`：`GetBalance` / `ListBalances` / `UpdateBalance`（联调充值）
+- [x] 单事务：幂等 + 余额冻结 + `orders` INSERT + `order_outbox` INSERT
+- [x] Outbox Relay → `order.commands`（`OrderCommandEnvelope` + `acks=all`）
+- [x] 消费 `match.events`：按 `event_type` 更新 `orders.status`（含 `ACCEPTED`、fill-wins）
+- [x] 消费 `trade.events`：按 `trade_id` 幂等写 `trades` + 更新 `account_balances`
+- [x] `client_order_id`（string）幂等；`order_id`（uint64）由 Order Service 发号
+- [x] 超时补偿 scheduler（`internal/order/reconciler`）
+- [ ] Outbox / 状态机 **集成测试**（testcontainers 或等价 PG 集成测；当前以单元测试为主）
+
+**第 4 步状态（代码）**：核心链路已实现，可进入第 5 步 Gateway；上线前建议跑通下方验收标准并补集成测试。
 
 **验收标准**
 
@@ -367,8 +375,7 @@ curl .../v1/orders/{id}      # 查询，可见成交状态
 | Kline / Index Price | 第 6 步 | 不阻塞撮合主链路 |
 | Shard Manager | Phase 3 | 先单 symbol |
 | `ticker@all` 做市商通道 | 第 6.5 步 | 需 Market Data 预聚合 |
-| Transactional Outbox 补偿 scheduler | 第 4 步可选 | 核心链路通后再加 |
-| `ListOrders` gRPC | 第 4 步可选 / 第 5 步 | `GetOrder` 已够 grpcurl 联调；列表可随 Gateway 一起做 |
+| Matching 对账 API（§5.6） | Phase 2+ | scheduler 已发 Cancel，对账为兜底 |
 | Redis 下单幂等缓存 | 第 4 步可选 | DB `client_order_idempotency` 唯一索引已足够 |
 | Protobuf 全量替换 | 第 3～4 步可渐进 | 可先用 struct + JSON 联调 |
 
