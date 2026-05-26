@@ -3,7 +3,7 @@
 **版本**: 1.2  
 **日期**: 2026-05-20  
 **状态**: 草稿  
-**关联**: [architecture-spec.md](./architecture-spec.md) · [development-roadmap.md](./development-roadmap.md)
+**关联**: [architecture-spec.md](./architecture-spec.md) · [development-roadmap.md](./development-roadmap.md) · [gateway-development-plan.md](./gateway-development-plan.md)（第 5 步实现清单）
 
 ---
 

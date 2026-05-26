@@ -3,6 +3,7 @@ module github.com/Grizzly1127/trading_matchengine
 go 1.26.3
 
 require (
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/rs/zerolog v1.35.1
 	github.com/segmentio/kafka-go v0.4.47

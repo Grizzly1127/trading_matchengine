@@ -307,6 +307,8 @@ grpcurl -plaintext localhost:50051 ... GetOrder     # 验证 status / filled_qua
 
 **目标**：对外 REST，对内 gRPC；Phase 1 不做 WebSocket。
 
+**详细开发步骤**：[gateway-development-plan.md](./gateway-development-plan.md)（范围、分阶段任务、联调命令、DoD）。
+
 **路径**
 
 | 路径 | 职责 |
@@ -315,11 +317,18 @@ grpcurl -plaintext localhost:50051 ... GetOrder     # 验证 status / filled_qua
 | `internal/gateway/handler/` | `POST/DELETE/GET /v1/orders` |
 | `internal/gateway/client/` | Order Service gRPC 客户端 |
 | `internal/gateway/middleware/` | JWT（可先硬编码 token）、`X-Request-Id` |
+| `internal/gateway/convert/` | JSON ↔ gRPC |
+| `internal/gateway/response/` | 统一错误/成功信封 |
+| `configs/gateway.json` | Gateway 配置 |
 
-**任务清单**
+**任务清单（摘要，勾选以详细文档为准）**
 
-- [ ] 实现 [rest-api.md](./rest-api.md) 中 Phase 1 订单接口
-- [ ] JSON ↔ gRPC 转换
+- [x] 阶段 0～1：骨架、配置、`/v1/health`、`/v1/time`、中间件
+- [ ] 阶段 2：`convert` + gRPC 错误 → REST
+- [ ] 阶段 3：`POST/DELETE/GET /v1/orders`（含列表，见开发计划 §1.3）
+- [ ] 阶段 4：单测 + 端到端联调
+- [ ] 实现 [rest-api.md](./rest-api.md) Phase 1 订单接口语义
+- [ ] JSON ↔ gRPC 转换；`order_id` 十进制字符串
 - [ ] 统一错误响应结构
 
 **验收标准**
@@ -329,9 +338,11 @@ curl -X POST .../v1/orders   # 下单
 curl .../v1/orders/{id}      # 查询，可见成交状态
 ```
 
+完整命令见 [gateway-development-plan.md §5](./gateway-development-plan.md#5-联调与验收)。
+
 **本阶段 Go 技能**：`net/http` 或 chi/gin、JSON、中间件链。
 
-**参考**：[rest-api.md §3](./rest-api.md#3-订单命令order-service)
+**参考**：[rest-api.md §3](./rest-api.md#3-订单命令order-service) · [order-api.md](./order-api.md) · [gateway-development-plan.md](./gateway-development-plan.md)
 
 ---
 
