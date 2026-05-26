@@ -102,7 +102,7 @@
 
 ### 阶段 2：错误映射与类型转换（约 1 天）
 
-- [ ] **2.1** `grpc/status` → REST（[rest-api.md §2.4](./rest-api.md#24-错误码)）：
+- [x] **2.1** `grpc/status` → REST（[rest-api.md §2.4](./rest-api.md#24-错误码)）：
 
 | gRPC code | HTTP | code |
 |-----------|------|------|
@@ -113,7 +113,7 @@
 | `Unavailable` | 503 | 50300 |
 | 其他 | 500 | 50000 |
 
-- [ ] **2.2** `internal/gateway/convert`（优先单测）：
+- [x] **2.2** `internal/gateway/convert`（优先单测）：
   - `order_id`：`uint64` ↔ 十进制 string
   - `side`：`BUY`/`SELL` ↔ `common.v1.Side`
   - `type`：`LIMIT`/`MARKET` ↔ `common.v1.OrderType`
@@ -122,20 +122,20 @@
 
 ### 阶段 3：订单 Handler（约 2 天）
 
-- [ ] **3.1** `POST /v1/orders`
+- [x] **3.1** `POST /v1/orders`
   - 解析 JSON → 校验必填 → `PlaceOrder`（`user_id` 来自 Auth）
   - `idempotent_hit=true` → **HTTP 200**；否则 **201**
   - 映射 `PlaceOrderResponse` → JSON（`order_id` 为字符串）
-- [ ] **3.2** `DELETE /v1/orders/{order_id}`
+- [x] **3.2** `DELETE /v1/orders/{order_id}`
   - 路径参数解析 `order_id`；可选 `?symbol=` 仅日志/校验
   - 映射 `CancelOrderResponse`（`status` 一般为 `CANCELING`）
-- [ ] **3.3** `GET /v1/orders/{order_id}`
+- [x] **3.3** `GET /v1/orders/{order_id}`
   - `GetOrder` → 完整 Order JSON（缺字段按 §1.3 处理）
-- [ ] **3.4** `GET /v1/orders`
+- [x] **3.4** `GET /v1/orders`
   - Query：`symbol`、`status`（逗号分隔）、`side`、`start_time`/`end_time`、`limit`
   - 映射 `ListOrders`（`page=1`，`page_size=min(limit,100)`）
   - 响应 `data.items`；`cursor`/`has_more` Phase 1 可简化
-- [ ] **3.5** 路由注册：注意 `/v1/orders` 与 `/v1/orders/{order_id}` 匹配顺序
+- [x] **3.5** 路由注册：注意 `/v1/orders` 与 `/v1/orders/{order_id}` 匹配顺序
 
 ### 阶段 4：测试与文档（约 1～1.5 天）
 

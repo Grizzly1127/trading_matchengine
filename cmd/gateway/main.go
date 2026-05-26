@@ -58,9 +58,7 @@ func main() {
 	}
 	defer orderGRPC.Close()
 
-	_ = orderGRPC.Client // 阶段 3 订单 handler 使用
-
-	router := server.NewRouter(log, cfg)
+	router := server.NewRouter(log, cfg, orderGRPC.Client)
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListen,
 		Handler:           router,

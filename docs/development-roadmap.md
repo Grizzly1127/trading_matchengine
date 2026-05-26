@@ -324,12 +324,12 @@ grpcurl -plaintext localhost:50051 ... GetOrder     # 验证 status / filled_qua
 **任务清单（摘要，勾选以详细文档为准）**
 
 - [x] 阶段 0～1：骨架、配置、`/v1/health`、`/v1/time`、中间件
-- [ ] 阶段 2：`convert` + gRPC 错误 → REST
-- [ ] 阶段 3：`POST/DELETE/GET /v1/orders`（含列表，见开发计划 §1.3）
+- [x] 阶段 2：`convert` + gRPC 错误 → REST
+- [x] 阶段 3：`POST/DELETE/GET /v1/orders`（含列表，见开发计划 §1.3）
 - [ ] 阶段 4：单测 + 端到端联调
-- [ ] 实现 [rest-api.md](./rest-api.md) Phase 1 订单接口语义
-- [ ] JSON ↔ gRPC 转换；`order_id` 十进制字符串
-- [ ] 统一错误响应结构
+- [x] 实现 [rest-api.md](./rest-api.md) Phase 1 订单接口语义
+- [x] JSON ↔ gRPC 转换；`order_id` 十进制字符串
+- [x] 统一错误响应结构
 
 **验收标准**
 
