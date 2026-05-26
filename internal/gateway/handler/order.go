@@ -27,6 +27,7 @@ type Orders struct {
 }
 
 type placeOrderRequest struct {
+	UserID        uint64 `json:"user_id"`
 	ClientOrderID string `json:"client_order_id"`
 	Symbol        string `json:"symbol"`
 	Side          string `json:"side"`
@@ -38,15 +39,13 @@ type placeOrderRequest struct {
 
 // PlaceOrder POST /v1/orders
 func (h *Orders) PlaceOrder(w http.ResponseWriter, r *http.Request) {
-	userID := gwmw.UserIDFromContext(r.Context())
-	if userID == 0 {
-		grpcerr.Write(w, r, grpcerr.BadRequest("user not authenticated"))
-		return
-	}
-
 	var body placeOrderRequest
 	if err := decodeJSON(w, r, &body); err != nil {
 		grpcerr.Write(w, r, grpcerr.BadRequest(err.Error()))
+		return
+	}
+	userID, ok := requireUserID(w, r, body.UserID)
+	if !ok {
 		return
 	}
 	_ = body.TimeInForce // Phase 1 忽略
@@ -99,9 +98,8 @@ func (h *Orders) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 
 // CancelOrder DELETE /v1/orders/{order_id}
 func (h *Orders) CancelOrder(w http.ResponseWriter, r *http.Request) {
-	userID := gwmw.UserIDFromContext(r.Context())
-	if userID == 0 {
-		grpcerr.Write(w, r, grpcerr.BadRequest("user not authenticated"))
+	userID, ok := requireUserID(w, r, 0)
+	if !ok {
 		return
 	}
 
@@ -134,9 +132,8 @@ func (h *Orders) CancelOrder(w http.ResponseWriter, r *http.Request) {
 
 // GetOrder GET /v1/orders/{order_id}
 func (h *Orders) GetOrder(w http.ResponseWriter, r *http.Request) {
-	userID := gwmw.UserIDFromContext(r.Context())
-	if userID == 0 {
-		grpcerr.Write(w, r, grpcerr.BadRequest("user not authenticated"))
+	userID, ok := requireUserID(w, r, 0)
+	if !ok {
 		return
 	}
 
@@ -160,9 +157,8 @@ func (h *Orders) GetOrder(w http.ResponseWriter, r *http.Request) {
 
 // ListOrders GET /v1/orders
 func (h *Orders) ListOrders(w http.ResponseWriter, r *http.Request) {
-	userID := gwmw.UserIDFromContext(r.Context())
-	if userID == 0 {
-		grpcerr.Write(w, r, grpcerr.BadRequest("user not authenticated"))
+	userID, ok := requireUserID(w, r, 0)
+	if !ok {
 		return
 	}
 

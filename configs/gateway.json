@@ -3,8 +3,7 @@
   "order_grpc_addr": "localhost:50051",
   "order_grpc_dial_seconds": 10,
   "auth": {
-    "static_token": "dev-token-change-me",
-    "static_user_id": 1
+    "static_token": "dev-token-change-me"
   },
   "log": {
     "level": "info",

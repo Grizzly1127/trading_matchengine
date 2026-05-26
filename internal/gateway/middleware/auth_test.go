@@ -10,7 +10,7 @@ import (
 
 func TestAuth_PublicHealth(t *testing.T) {
 	var called bool
-	h := Auth(config.AuthConfig{StaticToken: "secret", StaticUserID: 1})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -28,7 +28,7 @@ func TestAuth_PublicHealth(t *testing.T) {
 }
 
 func TestAuth_MissingToken(t *testing.T) {
-	h := Auth(config.AuthConfig{StaticToken: "secret", StaticUserID: 1})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("should not reach handler")
 	}))
 
@@ -41,15 +41,16 @@ func TestAuth_MissingToken(t *testing.T) {
 	}
 }
 
-func TestAuth_ValidToken(t *testing.T) {
+func TestAuth_ValidTokenSetsUserIDFromHeader(t *testing.T) {
 	var userID uint64
-	h := Auth(config.AuthConfig{StaticToken: "secret", StaticUserID: 42})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID = UserIDFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/orders", nil)
 	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set(HeaderUserID, "42")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 

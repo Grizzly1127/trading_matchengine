@@ -20,7 +20,7 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.HTTPListen != ":8080" {
 		t.Fatalf("http_listen=%q", cfg.HTTPListen)
 	}
-	if cfg.Auth.StaticUserID != 1 {
-		t.Fatalf("static_user_id=%d", cfg.Auth.StaticUserID)
+	if cfg.Auth.StaticToken == "" {
+		t.Fatal("static_token empty")
 	}
 }

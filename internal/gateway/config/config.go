@@ -16,10 +16,9 @@ type Config struct {
 	Log              LogConfig  `json:"log"`
 }
 
-// AuthConfig Phase 1 静态 Bearer 鉴权。
+// AuthConfig Phase 1 静态 Bearer 鉴权（用户 ID 由请求传入，见 rest-api §2.2）。
 type AuthConfig struct {
-	StaticToken  string `json:"static_token"`
-	StaticUserID uint64 `json:"static_user_id"`
+	StaticToken string `json:"static_token"`
 }
 
 // LogConfig 控制结构化日志。
@@ -78,9 +77,6 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.Auth.StaticToken == "" {
 		c.Auth.StaticToken = "dev-token-change-me"
 	}
-	if c.Auth.StaticUserID == 0 {
-		c.Auth.StaticUserID = 1
-	}
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}
@@ -121,9 +117,6 @@ func (c Config) validate() error {
 	}
 	if strings.TrimSpace(c.Auth.StaticToken) == "" {
 		return fmt.Errorf("config: auth.static_token is required")
-	}
-	if c.Auth.StaticUserID == 0 {
-		return fmt.Errorf("config: auth.static_user_id is required")
 	}
 	return nil
 }

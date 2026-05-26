@@ -4,3 +4,43 @@
 [90m2026-05-25T16:53:08+08:00[0m [31mFTL[0m [1mexit[0m [36merror=[0m[31m[1m"consumer: process offset 0: kafka.(*Writer): Topic must not be specified for both Writer and Message"[0m[0m [36mservice=[0mmatching
 [90m2026-05-26T14:58:00+08:00[0m [32mINF[0m [1mmatching engine ready[0m [36mconfig=[0m/home/ubuntu/trading_matchengine/configs/matching.kafka.json [36mdata_dir=[0mdata [36mkafka_enabled=[0mtrue [36mlast_seq=[0m2 [36mrecovered_offset=[0m2 [36mservice=[0mmatching [36mshard_id=[0mshard-0
 [90m2026-05-26T14:58:00+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mbrokers=[0m["localhost:9092"] [36mcommand_topic=[0morder.commands [36mhas_resume=[0mfalse [36mpartition=[0m0 [36mresume_offset=[0m0 [36mservice=[0mmatching [36mstart_offset=[0m-1
+[90m2026-05-26T16:36:27+08:00[0m [32mINF[0m [1msnapshot saved[0m [36mlast_seq=[0m10 [36mservice=[0mmatching
+[90m2026-05-26T16:40:07+08:00[0m [32mINF[0m [1mmatching engine ready[0m [36mconfig=[0m/home/ubuntu/trading_matchengine/configs/matching.kafka.json [36mdata_dir=[0mdata [36mkafka_enabled=[0mtrue [36mlast_seq=[0m10 [36mrecovered_offset=[0m10 [36mservice=[0mmatching [36mshard_id=[0mshard-0
+[90m2026-05-26T16:40:07+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mbrokers=[0m["localhost:9092"] [36mcommand_topic=[0morder.commands [36mhas_resume=[0mtrue [36mpartition=[0m0 [36mresume_offset=[0m8 [36mservice=[0mmatching [36mstart_offset=[0m9
+panic: StartOffset is not valid 9
+
+goroutine 1 [running]:
+github.com/segmentio/kafka-go.NewReader({{0xe001e1ae3c0, 0x1, 0x1}, {0xe001e19ca20, 0x10}, {0x0, 0x0, 0x0}, {0xe001e19ca30, 0xe}, ...})
+	/home/ubuntu/go/pkg/mod/github.com/segmentio/kafka-go@v0.4.47/reader.go:740 +0x853
+github.com/Grizzly1127/trading_matchengine/pkg/kafka.NewCommandReader({{0xe001e1ae3c0, 0x1, 0x1}, {0xe001e19ca30, 0xe}, {0xe001e19ca20, 0x10}, 0x0, 0x9})
+	/home/ubuntu/trading_matchengine/pkg/kafka/reader.go:39 +0x214
+main.runKafka({_, _}, {{0xe001e19c9f0, 0x4}, {0xe001e19c9f4, 0x7}, 0x2710, 0x1, {0x0, 0x0}, ...}, ...)
+	/home/ubuntu/trading_matchengine/cmd/matching/main.go:137 +0x236
+main.main()
+	/home/ubuntu/trading_matchengine/cmd/matching/main.go:84 +0x97c
+[90m2026-05-26T16:40:33+08:00[0m [32mINF[0m [1mmatching engine ready[0m [36mconfig=[0m/home/ubuntu/trading_matchengine/configs/matching.kafka.json [36mdata_dir=[0mdata [36mkafka_enabled=[0mtrue [36mlast_seq=[0m10 [36mrecovered_offset=[0m10 [36mservice=[0mmatching [36mshard_id=[0mshard-0
+[90m2026-05-26T16:40:33+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mbrokers=[0m["localhost:9092"] [36mcommand_topic=[0morder.commands [36mhas_resume=[0mtrue [36mpartition=[0m0 [36mresume_offset=[0m8 [36mservice=[0mmatching [36mstart_offset=[0m9
+panic: StartOffset is not valid 9
+
+goroutine 1 [running]:
+github.com/segmentio/kafka-go.NewReader({{0x33ce85916400, 0x1, 0x1}, {0x33ce858f0ae0, 0x10}, {0x0, 0x0, 0x0}, {0x33ce858f0af0, 0xe}, ...})
+	/home/ubuntu/go/pkg/mod/github.com/segmentio/kafka-go@v0.4.47/reader.go:740 +0x853
+github.com/Grizzly1127/trading_matchengine/pkg/kafka.NewCommandReader({{0x33ce85916400, 0x1, 0x1}, {0x33ce858f0af0, 0xe}, {0x33ce858f0ae0, 0x10}, 0x0, 0x9})
+	/home/ubuntu/trading_matchengine/pkg/kafka/reader.go:39 +0x214
+main.runKafka({_, _}, {{0x33ce858f0ab0, 0x4}, {0x33ce858f0ab4, 0x7}, 0x2710, 0x1, {0x0, 0x0}, ...}, ...)
+	/home/ubuntu/trading_matchengine/cmd/matching/main.go:137 +0x236
+main.main()
+	/home/ubuntu/trading_matchengine/cmd/matching/main.go:84 +0x97c
+2026-05-26T16:42:17+08:00 INF matching engine ready config=/home/ubuntu/trading_matchengine/configs/matching.kafka.json data_dir=data kafka_enabled=true last_seq=10 recovered_offset=10 service=matching shard_id=shard-0
+2026-05-26T16:42:17+08:00 INF kafka consumer starting brokers=["localhost:9092"] command_topic=order.commands has_resume=true partition=0 resume_offset=8 service=matching start_offset=9
+2026-05-26T16:42:18+08:00 INF snapshot saved last_seq=10 service=matching
+2026-05-26T16:42:18+08:00 FTL exit error="consumer: read: failed to dial: failed to open connection to localhost:9092: dial tcp 127.0.0.1:9092: connect: connection refused" service=matching
+[90m2026-05-26T16:43:10+08:00[0m [32mINF[0m [1mmatching engine ready[0m [36mconfig=[0m/home/ubuntu/trading_matchengine/configs/matching.kafka.json [36mdata_dir=[0mdata [36mkafka_enabled=[0mtrue [36mlast_seq=[0m10 [36mrecovered_offset=[0m10 [36mservice=[0mmatching [36mshard_id=[0mshard-0
+[90m2026-05-26T16:43:10+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mbrokers=[0m["localhost:9092"] [36mcommand_topic=[0morder.commands [36mhas_resume=[0mtrue [36mpartition=[0m0 [36mresume_offset=[0m8 [36mservice=[0mmatching [36mstart_offset=[0m9
+[90m2026-05-26T18:20:40+08:00[0m [32mINF[0m [1msnapshot saved[0m [36mlast_seq=[0m11 [36mservice=[0mmatching
+[90m2026-05-26T18:20:41+08:00[0m [32mINF[0m [1mmatching engine ready[0m [36mconfig=[0m/home/ubuntu/trading_matchengine/configs/matching.kafka.json [36mdata_dir=[0mdata [36mkafka_enabled=[0mtrue [36mlast_seq=[0m11 [36mrecovered_offset=[0m11 [36mservice=[0mmatching [36mshard_id=[0mshard-0
+[90m2026-05-26T18:20:41+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mbrokers=[0m["localhost:9092"] [36mcommand_topic=[0morder.commands [36mhas_resume=[0mtrue [36mpartition=[0m0 [36mresume_offset=[0m9 [36mservice=[0mmatching [36mstart_offset=[0m10
+[90m2026-05-26T22:34:02+08:00[0m [32mINF[0m [1msnapshot saved[0m [36mlast_seq=[0m15 [36mservice=[0mmatching
+[90m2026-05-26T22:35:21+08:00[0m [32mINF[0m [1mmatching engine ready[0m [36mconfig=[0m/home/ubuntu/trading_matchengine/configs/matching.kafka.json [36mdata_dir=[0mdata [36mkafka_enabled=[0mtrue [36mlast_seq=[0m15 [36mrecovered_offset=[0m15 [36mservice=[0mmatching [36mshard_id=[0mshard-0
+[90m2026-05-26T22:35:21+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mbrokers=[0m["localhost:9092"] [36mcommand_topic=[0morder.commands [36mhas_resume=[0mtrue [36mpartition=[0m0 [36mresume_offset=[0m13 [36mservice=[0mmatching [36mstart_offset=[0m14
+[90m2026-05-26T22:39:24+08:00[0m [32mINF[0m [1msnapshot saved[0m [36mlast_seq=[0m16 [36mservice=[0mmatching

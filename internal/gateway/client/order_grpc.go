@@ -13,14 +13,15 @@ import (
 
 const defaultDialTimeout = 10 * time.Second
 
-// Order 封装 Order Service gRPC 连接与客户端。
-type Order struct {
-	Conn   *grpc.ClientConn
-	Client orderv1.OrderServiceClient
+// OrderGRPC 封装 Order Service gRPC 连接与客户端。
+type OrderGRPC struct {
+	Conn          *grpc.ClientConn
+	OrderClient   orderv1.OrderServiceClient
+	BalanceClient orderv1.BalanceServiceClient
 }
 
 // Connect 建立 gRPC 连接并等待 Ready（带超时）。
-func Connect(ctx context.Context, addr string, dialTimeout time.Duration) (*Order, error) {
+func Connect(ctx context.Context, addr string, dialTimeout time.Duration) (*OrderGRPC, error) {
 	if dialTimeout <= 0 {
 		dialTimeout = defaultDialTimeout
 	}
@@ -40,9 +41,10 @@ func Connect(ctx context.Context, addr string, dialTimeout time.Duration) (*Orde
 		return nil, fmt.Errorf("grpc connect %q: %w", addr, err)
 	}
 
-	return &Order{
-		Conn:   conn,
-		Client: orderv1.NewOrderServiceClient(conn),
+	return &OrderGRPC{
+		Conn:          conn,
+		OrderClient:   orderv1.NewOrderServiceClient(conn),
+		BalanceClient: orderv1.NewBalanceServiceClient(conn),
 	}, nil
 }
 
@@ -63,7 +65,7 @@ func waitReady(ctx context.Context, conn *grpc.ClientConn) error {
 }
 
 // Close 关闭底层连接。
-func (o *Order) Close() error {
+func (o *OrderGRPC) Close() error {
 	if o == nil || o.Conn == nil {
 		return nil
 	}

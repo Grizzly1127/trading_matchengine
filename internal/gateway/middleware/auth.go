@@ -8,7 +8,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/response"
 )
 
-// Auth Phase 1：校验 Bearer token，将 static_user_id 写入 context。
+// Auth Phase 1：校验 Bearer token；user_id 由请求指定（见 ResolveUserID）。
 func Auth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +23,10 @@ func Auth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := WithUserID(r.Context(), cfg.StaticUserID)
+			ctx := r.Context()
+			if id, err := parseUserIDHeaderOrQuery(r); err == nil {
+				ctx = WithUserID(ctx, id)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

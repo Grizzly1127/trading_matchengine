@@ -17,7 +17,7 @@
 |----|------|
 | 订单 REST | `POST` / `DELETE` / `GET /v1/orders`、`GET /v1/orders/{order_id}` |
 | 系统 REST | `GET /v1/health`、`GET /v1/time`（Gateway 本地，不调下游） |
-| 鉴权 | Phase 1：`Authorization: Bearer` + 配置硬编码 token → 固定 `user_id` |
+| 鉴权 | Phase 1：`Authorization: Bearer` + 配置 `static_token`；`user_id` 由请求传入 |
 | 横切 | `X-Request-Id`、统一 JSON 信封、gRPC 错误 → HTTP/code |
 | 转换 | JSON ↔ `order.v1.OrderService` gRPC；`order_id` 十进制字符串 |
 
@@ -67,7 +67,6 @@
 | `http_listen` | HTTP 监听地址 | `:8080` |
 | `order_grpc_addr` | Order Service gRPC | `localhost:50051` |
 | `auth.static_token` | Phase 1 Bearer token | 联调用固定值 |
-| `auth.static_user_id` | token 对应用户 ID | `1` |
 | `log.*` | 日志 | 与 `configs/order.json` 风格一致 |
 
 ### 2.3 构建

@@ -52,13 +52,18 @@ func main() {
 	log := logRes.Logger
 	initCtx := context.Background()
 
-	orderGRPC, err := client.Connect(initCtx, cfg.OrderGRPCAddr, time.Duration(cfg.OrderGRPCDialSec)*time.Second)
+	grpcClients, err := client.Connect(initCtx, cfg.OrderGRPCAddr, time.Duration(cfg.OrderGRPCDialSec)*time.Second)
 	if err != nil {
 		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderGRPCAddr).Msg("connect order service")
 	}
-	defer orderGRPC.Close()
+	defer grpcClients.Close()
 
-	router := server.NewRouter(log, cfg, orderGRPC.Client)
+	router := server.NewRouter(server.Deps{
+		Log:     log,
+		Config:  cfg,
+		Order:   grpcClients.OrderClient,
+		Balance: grpcClients.BalanceClient,
+	})
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListen,
 		Handler:           router,
@@ -73,7 +78,6 @@ func main() {
 			Str("config", *configPath).
 			Str("http_listen", cfg.HTTPListen).
 			Str("order_grpc_addr", cfg.OrderGRPCAddr).
-			Uint64("auth_user_id", cfg.Auth.StaticUserID).
 			Msg("gateway ready")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("http serve")
