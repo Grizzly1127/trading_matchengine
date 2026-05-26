@@ -53,7 +53,8 @@ func (r *Repository) ApplyMatchEvent(ctx context.Context, in MatchEventApply) er
 		if err := updateFilledQuantity(ctx, tx, order.ID, order.Version, in.FilledQuantity); err != nil {
 			return err
 		}
-		if target == status.Canceled || target == status.Filled {
+		// 仅撤单在 match 阶段释放剩余冻结；成交释放等 trade.events 结算后再做（避免 filled_quantity 未更新误释放全部冻结）。
+		if target == status.Canceled {
 			current, err := getOrderForUpdate(ctx, tx, order.ID)
 			if err != nil {
 				return err
@@ -79,7 +80,7 @@ func (r *Repository) ApplyMatchEvent(ctx context.Context, in MatchEventApply) er
 		}
 		return err
 	}
-	if target == status.Canceled || target == status.Filled {
+	if target == status.Canceled {
 		current, err := getOrderForUpdate(ctx, tx, order.ID)
 		if err != nil {
 			return err

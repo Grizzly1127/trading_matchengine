@@ -7,7 +7,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/Grizzly1127/trading_matchengine/internal/order/symbol"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/status"
+	ordersymbol "github.com/Grizzly1127/trading_matchengine/internal/order/symbol"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 )
 
@@ -32,7 +33,7 @@ func (r *Repository) ApplyTradeEvent(ctx context.Context, in TradeEventApply) er
 	if err != nil || !qty.IsPositive() {
 		return fmt.Errorf("apply trade event: invalid quantity %q", in.Quantity)
 	}
-	pair, err := symbol.ParsePair(in.Symbol)
+	pair, err := ordersymbol.ParsePair(in.Symbol)
 	if err != nil {
 		return fmt.Errorf("apply trade event: %w", err)
 	}
@@ -68,7 +69,50 @@ func (r *Repository) ApplyTradeEvent(ctx context.Context, in TradeEventApply) er
 		return err
 	}
 
+	if err := applyOrderTradeFill(ctx, tx, maker.ID, qty); err != nil {
+		return err
+	}
+	if err := applyOrderTradeFill(ctx, tx, taker.ID, qty); err != nil {
+		return err
+	}
+
 	return tx.Commit(ctx)
+}
+
+// applyOrderTradeFill 在成交结算后累加 filled_quantity；全部成交后释放剩余冻结。
+func applyOrderTradeFill(ctx context.Context, tx pgx.Tx, orderID uint64, fillQty decimal.Decimal) error {
+	order, err := getOrderForUpdate(ctx, tx, orderID)
+	if err != nil {
+		return err
+	}
+	orderQty, err := decimal.NewFromString(order.Quantity)
+	if err != nil {
+		return fmt.Errorf("order quantity: %w", err)
+	}
+	filled, err := decimal.NewFromString(order.FilledQuantity)
+	if err != nil {
+		return fmt.Errorf("order filled_quantity: %w", err)
+	}
+
+	newFilled := filled.Add(fillQty)
+	if newFilled.GreaterThan(orderQty) {
+		newFilled = orderQty
+	}
+	filledStr := newFilled.String()
+	if err := updateFilledQuantity(ctx, tx, order.ID, order.Version, &filledStr); err != nil {
+		return err
+	}
+
+	fullyFilled := !newFilled.LessThan(orderQty)
+	if !fullyFilled && order.Status != status.Filled {
+		return nil
+	}
+
+	current, err := getOrderForUpdate(ctx, tx, orderID)
+	if err != nil {
+		return err
+	}
+	return releaseOrderRemainingFreeze(ctx, tx, current)
 }
 
 func insertTrade(ctx context.Context, tx pgx.Tx, in TradeEventApply) (bool, error) {
@@ -92,7 +136,7 @@ ON CONFLICT (trade_id) DO NOTHING`
 	return tag.RowsAffected() > 0, nil
 }
 
-func settleTradeForUser(ctx context.Context, tx pgx.Tx, userID uint64, side int16, pair symbol.Pair, notional, qty decimal.Decimal) error {
+func settleTradeForUser(ctx context.Context, tx pgx.Tx, userID uint64, side int16, pair ordersymbol.Pair, notional, qty decimal.Decimal) error {
 	switch commonv1.Side(side) {
 	case commonv1.Side_SIDE_BUY:
 		if err := consumeFrozen(ctx, tx, userID, pair.Quote, notional); err != nil {

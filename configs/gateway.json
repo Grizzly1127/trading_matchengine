@@ -1,0 +1,21 @@
+{
+  "http_listen": ":8080",
+  "order_grpc_addr": "localhost:50051",
+  "order_grpc_dial_seconds": 10,
+  "auth": {
+    "static_token": "dev-token-change-me"
+  },
+  "log": {
+    "level": "info",
+    "dev": true,
+    "file": "logs/gateway.log",
+    "async": true,
+    "buffer_size": 512,
+    "max_size_mb": 100,
+    "max_age_days": 7,
+    "max_backups": 30,
+    "compress": true,
+    "local_time": true,
+    "rotate_daily": true
+  }
+}

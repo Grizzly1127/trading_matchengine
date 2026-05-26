@@ -32,17 +32,17 @@ type KafkaConfig struct {
 
 // LogConfig 控制结构化日志。
 type LogConfig struct {
-	Level        string `json:"level"`
-	Dev          bool   `json:"dev"`
-	File         string `json:"file"`
-	Async        bool   `json:"async"`
-	BufferSize   int    `json:"buffer_size"`
-	MaxSizeMB    int    `json:"max_size_mb"`
-	MaxAgeDays   int    `json:"max_age_days"`
-	MaxBackups   int    `json:"max_backups"`
-	Compress     bool   `json:"compress"`
-	LocalTime    bool   `json:"local_time"`
-	RotateDaily  bool   `json:"rotate_daily"`
+	Level       string `json:"level"`
+	Dev         bool   `json:"dev"`
+	File        string `json:"file"`
+	Async       bool   `json:"async"`
+	BufferSize  int    `json:"buffer_size"`
+	MaxSizeMB   int    `json:"max_size_mb"`
+	MaxAgeDays  int    `json:"max_age_days"`
+	MaxBackups  int    `json:"max_backups"`
+	Compress    bool   `json:"compress"`
+	LocalTime   bool   `json:"local_time"`
+	RotateDaily bool   `json:"rotate_daily"`
 }
 
 // Load 从 JSON 文件加载配置并填充默认值。
@@ -67,7 +67,6 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults(raw)
-	cfg.applyKafkaDefaults(raw)
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -92,6 +91,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.DefaultSymbol == "" {
 		c.DefaultSymbol = "BTC-USDT"
 	}
+	c.applyKafkaDefaults(raw)
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}

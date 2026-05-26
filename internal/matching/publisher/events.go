@@ -46,7 +46,7 @@ func BuildNewOrderEvents(shard *symbol.Shard, cmd *matchingv1.NewOrderCommand, t
 			continue
 		}
 		seenMaker[tr.MakerOrderID] = struct{}{}
-		out.MatchEvents = append(out.MatchEvents, makerFillEvent(shard, symbolName, tr.MakerOrderID, commandID, walSeq))
+		out.MatchEvents = append(out.MatchEvents, makerFillEvent(shard, symbolName, tr, commandID, walSeq))
 	}
 
 	if len(trades) > 0 {
@@ -72,6 +72,7 @@ func BuildCancelEvents(cmd *matchingv1.CancelOrderCommand, walSeq uint64) Outbou
 	}
 }
 
+// takerFillEvent 构建成交事件。
 func takerFillEvent(shard *symbol.Shard, symbolName string, orderID, commandID uint64, order *commonv1.Order, walSeq uint64) *matchingv1.MatchEvent {
 	typ := matchingv1.MatchEventType_ORDER_FILLED
 	if orderActive(shard, symbolName, orderID) {
@@ -80,12 +81,32 @@ func takerFillEvent(shard *symbol.Shard, symbolName string, orderID, commandID u
 	return newMatchEvent(commandID, symbolName, orderID, typ, order, walSeq)
 }
 
-func makerFillEvent(shard *symbol.Shard, symbolName string, orderID, commandID, walSeq uint64) *matchingv1.MatchEvent {
+// makerFillEvent 构建 maker 成交事件。
+func makerFillEvent(shard *symbol.Shard, symbolName string, tr engine.Trade, commandID, walSeq uint64) *matchingv1.MatchEvent {
+	orderID := tr.MakerOrderID
 	typ := matchingv1.MatchEventType_ORDER_FILLED
 	if orderActive(shard, symbolName, orderID) {
 		typ = matchingv1.MatchEventType_ORDER_PARTIAL_FILLED
 	}
-	return newMatchEvent(commandID, symbolName, orderID, typ, nil, walSeq)
+	var order *commonv1.Order
+	if se, ok := shard.Get(symbolName); ok {
+		for _, o := range se.OrderBook.ActiveOrders() {
+			if o.OrderID == orderID {
+				order = engine.OrderToProto(o)
+				break
+			}
+		}
+	}
+	// Maker 已全成并从盘口移除时，用本笔成交量构造 remaining=0，供 Order Service 回写 filled_quantity。
+	if order == nil && typ == matchingv1.MatchEventType_ORDER_FILLED {
+		order = &commonv1.Order{
+			OrderId:   orderID,
+			Symbol:    symbolName,
+			Quantity:  &commonv1.Decimal{Value: tr.Quantity.String()},
+			Remaining: &commonv1.Decimal{Value: "0"},
+		}
+	}
+	return newMatchEvent(commandID, symbolName, orderID, typ, order, walSeq)
 }
 
 func newMatchEvent(commandID uint64, symbolName string, orderID uint64, typ matchingv1.MatchEventType, order *commonv1.Order, walSeq uint64) *matchingv1.MatchEvent {

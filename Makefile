@@ -31,6 +31,7 @@ build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/matching ./cmd/matching
 	go build -o $(BIN_DIR)/order ./cmd/order
+	go build -o $(BIN_DIR)/gateway ./cmd/gateway
 
 build-matching:
 	@mkdir -p $(BIN_DIR)
@@ -39,6 +40,10 @@ build-matching:
 build-order:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/order ./cmd/order
+
+build-gateway:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/gateway ./cmd/gateway
 
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html

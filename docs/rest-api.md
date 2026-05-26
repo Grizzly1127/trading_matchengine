@@ -1,9 +1,9 @@
 # API Gateway — REST 接口文档
 
-**版本**: 1.2  
-**日期**: 2026-05-20  
-**状态**: 草稿  
-**关联**: [architecture-spec.md](./architecture-spec.md) · [development-roadmap.md](./development-roadmap.md)
+**版本**: 1.5  
+**日期**: 2026-05-26  
+**状态**: 草稿（内网 Gateway 定位说明 + 余额 REST + 请求指定 user_id）  
+**关联**: [architecture-spec.md](./architecture-spec.md) · [development-roadmap.md](./development-roadmap.md) · [gateway-development-plan.md](./gateway-development-plan.md)（第 5 步实现清单）
 
 ---
 
@@ -11,23 +11,44 @@
 
 ### 1.1 API Gateway 的角色
 
-**是。** API Gateway 是客户端层的**唯一 HTTP/HTTPS 入口**，对外提供 REST 命令与查询；对内通过 gRPC 调用 Order Service、Market Data Service、Kline Service、Index Price Service 等，**不**直接访问 Kafka 或撮合引擎。
+本文档描述的是 **API Gateway 的 REST 契约**（`cmd/gateway`），用于 **内网服务集成**：将 HTTP 转为 Order / 行情等 gRPC 调用，**不**直接访问 Kafka 或撮合引擎。
+
+**推荐生产拓扑**（详见 [architecture-spec.md §2.1.1](./architecture-spec.md#211-部署形态公网-gateway-vs-内网-gateway--webbff)）：
 
 ```
-客户端 (Web / App / 量化)
-        │  HTTPS REST / WSS
+终端用户 (Web / App)
+        │  HTTPS（公网，用户文档由 Web/BFF 定义）
         ▼
-   API Gateway          ← 本文档描述的范围
-        │  gRPC（内网）
-        ├── Order Service      （下单、撤单、订单/成交查询）
+   Web / BFF 服务         ← 登录、充值流程、聚合 API、风控
+        │  HTTP（VPC 内网，不对 Internet 暴露）
+        ▼
+   API Gateway            ← 本文档描述的范围（内网）
+        │  gRPC
+        ├── Order Service      （下单、撤单、订单查询、余额读写）
         ├── Market Data Service（深度、Ticker）
         ├── Kline Service      （K 线历史）
         └── Index Price Service（指数价格）
 ```
 
-实时推送（深度、成交、订单状态）走 **WebSocket** `GET /v1/ws`（Gateway 管理连接，数据来自 Push Service / Redis Pub/Sub）。REST 负责**命令式写操作**与**拉取式读操作**。
+| 说明 | 内容 |
+|------|------|
+| **谁调用 Gateway** | Web/BFF、运营后台、清算服务；**不是**浏览器直连（生产） |
+| **Phase 1 联调** | 常在本机 `localhost:8080` 用 Bearer 测通；等价于「内网调用方」，不代表对终端用户开放 |
+| **WebSocket** | Phase 2+：`GET /v1/ws` 由 Gateway 管理连接，数据来自 Push / Redis |
 
-### 1.2 设计原则
+### 1.2 与 Web / BFF 的职责边界
+
+| 能力 | Web / BFF（公网） | API Gateway（内网，本文） |
+|------|------------------|---------------------------|
+| 用户登录、Session | ✅ | ❌ |
+| 下单 / 撤单 / 查单 | 转发（带真实 `user_id`） | ✅ `POST/DELETE/GET /v1/orders` |
+| 查余额 | 可对用户暴露 | ✅ `GET /v1/balances` |
+| 充值到账加余额 | 支付/链上确认后调用 Gateway | ✅ `POST /v1/balances`（**仅内网调用方**） |
+| 终端用户直接调账 | ❌ | ❌（勿将 Gateway 暴露公网） |
+
+Gateway 保持 **薄**：协议转换、统一信封、`X-Request-Id`、gRPC 错误映射；业务编排（支付、KYC、聚合首页）在 Web 完成。
+
+### 1.3 设计原则
 
 | 原则 | 说明 |
 |------|------|
@@ -36,7 +57,7 @@
 | 无跨服务 REST | 仅 Gateway 对外暴露 REST；服务间禁止 REST 互调 |
 | 精度 | 价格、数量使用 **字符串** 传递十进制，避免浮点误差 |
 
-### 1.3 订单标识
+### 1.4 订单标识
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -47,7 +68,7 @@
 
 **Protobuf / gRPC**：`order_id` 为 `uint64`；`client_order_id` 为 `string`。详见 [architecture-spec.md §2.2.1](./architecture-spec.md#221-订单标识order_id--client_order_id)。
 
-### 1.4 基础信息
+### 1.5 基础信息
 
 | 项 | 值 |
 |----|-----|
@@ -64,13 +85,16 @@
 
 ### 2.1 认证方式
 
-#### Phase 1：Bearer JWT（用户会话）
+#### Phase 1：Bearer Token + 请求指定用户
 
-登录/换票接口由账户模块提供（架构 Phase 1 余额在 Order Service，登录可后续独立）。业务请求头：
+Gateway 校验内网调用方 Token；**操作用户**由请求显式传入（Web/BFF 在登录后填入真实 `user_id`）。业务请求头：
 
 ```http
 Authorization: Bearer <access_token>
+X-User-Id: <user_id>
 ```
+
+`user_id` 为无符号整数，**大于 0**。除下表三种方式外，还可写在 JSON body（见各 POST 接口）。
 
 #### Phase 4：API Key + HMAC 签名（程序化交易）
 
@@ -91,9 +115,20 @@ X-SIGNATURE: <hmac_sha256_hex>
 | 头 | 必填 | 说明 |
 |----|------|------|
 | `Authorization` | 是* | Bearer Token（写操作与私有读） |
+| `X-User-Id` | 是* | 操作用户 ID（uint64 十进制字符串）；GET/DELETE 常用；POST 可与 body `user_id` 二选一 |
 | `Content-Type` | 写操作 | `application/json` |
 | `X-Request-Id` | 否 | 客户端追踪 ID；未传时 Gateway 生成并原样返回 |
 | `Accept-Language` | 否 | 错误文案语言，默认 `zh-CN` |
+
+**`user_id` 传递方式**（优先级：**JSON body** > **`X-User-Id`** > **query `user_id`**）：
+
+| 方式 | 适用 | 示例 |
+|------|------|------|
+| JSON `user_id` | `POST` 有 body 的接口 | `"user_id": 1` |
+| 请求头 `X-User-Id` | 全部需鉴权接口 | `X-User-Id: 1` |
+| Query `user_id` | `GET` / `DELETE` | `GET /v1/orders?user_id=1` |
+
+未传或 `user_id=0` 时返回 `400`，`message` 提示缺少 `user_id`。
 
 \* 公开行情接口（深度、Ticker、K 线、指数价）可不鉴权，由部署策略决定。
 
@@ -197,6 +232,7 @@ POST /v1/orders
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| `user_id` | number | 是* | 用户 ID；也可用 `X-User-Id` / `?user_id=` |
 | `client_order_id` | string | 是 | 客户端幂等 ID，最长 64，用户维度唯一 |
 | `symbol` | string | 是 | 交易对，如 `BTC-USDT` |
 | `side` | string | 是 | `BUY` \| `SELL` |
@@ -209,6 +245,7 @@ POST /v1/orders
 
 ```json
 {
+  "user_id": 1,
   "client_order_id": "my-app-20260520-001",
   "symbol": "BTC-USDT",
   "side": "BUY",
@@ -259,6 +296,7 @@ curl -s -X POST "https://api.example.com/v1/orders" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "user_id": 1,
     "client_order_id": "my-app-20260520-001",
     "symbol": "BTC-USDT",
     "side": "BUY",
@@ -287,6 +325,7 @@ DELETE /v1/orders/{order_id}
 | 参数 | 说明 |
 |------|------|
 | `symbol` | 建议传入，用于 Gateway 路由校验 |
+| `user_id` | 是* | 用户 ID（也可用 `X-User-Id`） |
 
 **响应 `data`**
 
@@ -305,7 +344,7 @@ DELETE /v1/orders/{order_id}
 **curl**
 
 ```bash
-curl -s -X DELETE "https://api.example.com/v1/orders/1000000001?symbol=BTC-USDT" \
+curl -s -X DELETE "https://api.example.com/v1/orders/1000000001?symbol=BTC-USDT&user_id=1" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -348,6 +387,7 @@ GET /v1/orders
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| `user_id` | integer | 是* | 用户 ID（也可用 `X-User-Id`） |
 | `symbol` | string | 否 | 过滤交易对 |
 | `status` | string | 否 | 多状态逗号分隔，如 `PENDING,PARTIAL` |
 | `side` | string | 否 | `BUY` \| `SELL` |
@@ -360,7 +400,128 @@ GET /v1/orders
 
 ---
 
-### 3.6 查询成交记录
+### 3.6 账户余额（Order Service / BalanceService）
+
+Gateway 已实现；gRPC 定义见 [order-api.md §4](./order-api.md#4-grpcbalanceservice)。**需鉴权**（`Authorization: Bearer`）。
+
+余额字段均为**十进制字符串**。`available = balance - frozen`（由服务端计算回显）。
+
+#### 3.6.1 查询全部余额
+
+```http
+GET /v1/balances
+```
+
+**响应 `data`**
+
+```json
+{
+  "items": [
+    {
+      "asset": "USDT",
+      "balance": "10000.000000000000000000",
+      "frozen": "100.000000000000000000",
+      "available": "9900.000000000000000000"
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `items` | array | 各资产余额；无记录时为空数组 |
+| `items[].asset` | string | 资产符号，大写，如 `USDT`、`BTC` |
+| `items[].balance` | string | 总余额 |
+| `items[].frozen` | string | 冻结金额 |
+| `items[].available` | string | 可用余额 |
+
+**curl**
+
+```bash
+curl -s "http://localhost:8080/v1/balances?user_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### 3.6.2 查询单资产余额
+
+```http
+GET /v1/balances/{asset}
+```
+
+**路径参数**
+
+| 参数 | 说明 |
+|------|------|
+| `asset` | 资产符号，如 `USDT`（大小写不敏感，服务端归一为大写） |
+
+**响应 `data`**：与 §3.6.1 中单条 `items[]` 元素结构相同。
+
+不存在该资产记录时：`404` / `code: 40400`。
+
+**curl**
+
+```bash
+curl -s "http://localhost:8080/v1/balances/USDT?user_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### 3.6.3 调账 / 充值（内网 / 联调）
+
+调整可用余额；幂等键为 `business` + `business_id`（与 gRPC `UpdateBalance` 一致）。
+
+**调用方**：仅 **Web/BFF、清算或运营后台**（经内网访问 Gateway），**不是**终端用户浏览器。典型流程：支付回调成功 → Web 校验 → `POST` 本接口 → Order 加余额。
+
+**生产**：Gateway 不对公网暴露；使用服务间鉴权（mTLS / 服务 JWT），与用户 Session 分离。Phase 1 本地 `localhost` + Bearer 仅用于联调。
+
+```http
+POST /v1/balances
+```
+
+**请求体**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_id` | number | 是* | 用户 ID；也可用 `X-User-Id` |
+| `asset` | string | 是 | 资产符号，如 `USDT` |
+| `business` | string | 是 | 业务类型，如 `deposit`，最长 32 |
+| `business_id` | integer (uint64) | 是 | 业务幂等 ID，同 `business` 重复提交不重复加款 |
+| `change` | string | 是 | 变动量，十进制；正数充值、负数扣款，不可为 0 |
+
+**请求示例**
+
+```json
+{
+  "user_id": 1,
+  "asset": "USDT",
+  "business": "deposit",
+  "business_id": 1001,
+  "change": "10000"
+}
+```
+
+**响应 `data`**：更新后的余额对象（结构同 §3.6.2）。
+
+**语义**
+
+- `200`：成功（含幂等命中，返回当前余额）。
+- 余额不足（扣款）：`422` / `code: 42201`。
+
+**curl**
+
+```bash
+curl -s -X POST "http://localhost:8080/v1/balances" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":1,"asset":"USDT","business":"deposit","business_id":1001,"change":"10000"}'
+```
+
+---
+
+### 3.7 查询成交记录
 
 ```http
 GET /v1/trades
@@ -803,7 +964,10 @@ trade.events / match.events
 | `DELETE` | `/v1/orders/{order_id}` | 撤单 | Order |
 | `GET` | `/v1/orders/{order_id}` | 单个订单 | Order |
 | `GET` | `/v1/orders` | 订单列表 | Order |
-| `GET` | `/v1/trades` | 成交列表 | Order |
+| `GET` | `/v1/balances` | 全部资产余额 | Order |
+| `GET` | `/v1/balances/{asset}` | 单资产余额 | Order |
+| `POST` | `/v1/balances` | 调账/充值（联调） | Order |
+| `GET` | `/v1/trades` | 成交列表（Gateway 未实现） | Order |
 | `GET` | `/v1/market/depth` | 深度 | Market Data |
 | `GET` | `/v1/market/ticker` | Ticker（单/批量） | Market Data |
 | `GET` | `/v1/market/ticker/all` | 全市场 Ticker 快照（做市商） | Market Data / Redis |
@@ -819,12 +983,13 @@ trade.events / match.events
 
 ## 10. 客户端集成建议
 
-1. **下单后**：轮询 `GET /v1/orders/{id}` 或订阅 WS `order`，直到 `status` 为终态。
-2. **幂等**：始终传唯一 `client_order_id`；网络超时可安全重试。
-3. **撤单**：收到 `CANCELING` 后继续等待 `CANCELED`；`CANCELING` 期间仍可能少量成交（见架构 R5）。
-4. **行情**：展示用 REST 拉快照；实时用 WS，避免高频轮询深度。
-5. **做市商全市场**：冷启动 `GET /v1/market/ticker/all` → 订阅 `ticker@all:USDT` 收 delta；禁止秒级轮询 REST。
-6. **时钟**：程序化签名前调用 `GET /v1/time` 校准偏差。
+1. **下单前**：`POST /v1/balances` 充值或确认 `GET /v1/balances/{asset}` 可用余额充足。
+2. **下单后**：轮询 `GET /v1/orders/{id}` 或订阅 WS `order`，直到 `status` 为终态。
+3. **幂等**：始终传唯一 `client_order_id`；网络超时可安全重试。
+4. **撤单**：收到 `CANCELING` 后继续等待 `CANCELED`；`CANCELING` 期间仍可能少量成交（见架构 R5）。
+5. **行情**：展示用 REST 拉快照；实时用 WS，避免高频轮询深度。
+6. **做市商全市场**：冷启动 `GET /v1/market/ticker/all` → 订阅 `ticker@all:USDT` 收 delta；禁止秒级轮询 REST。
+7. **时钟**：程序化签名前调用 `GET /v1/time` 校准偏差。
 
 ---
 
@@ -835,3 +1000,6 @@ trade.events / match.events
 | 1.0 | 2026-05-20 | 初稿，对齐 architecture-spec v1.0 |
 | 1.1 | 2026-05-20 | 新增做市商 `ticker@all`（REST 快照 + WS snapshot/delta） |
 | 1.2 | 2026-05-20 | `order_id` 改为 uint64（JSON 十进制字符串）；`client_order_id` 保持 string |
+| 1.3 | 2026-05-26 | 新增 §3.6 账户余额 REST（`GET/POST /v1/balances`），Gateway 已实现 |
+| 1.4 | 2026-05-26 | §1.1～§1.2 明确内网 Gateway + 公网 Web/BFF 分层；§3.6.3 调账调用方说明 |
+| 1.5 | 2026-05-26 | §2.1～§2.2 请求指定 `user_id`（body / `X-User-Id` / query）；移除配置 `static_user_id` |
