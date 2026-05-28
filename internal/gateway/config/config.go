@@ -9,11 +9,20 @@ import (
 
 // Config 是 gateway 进程启动配置。
 type Config struct {
-	HTTPListen       string     `json:"http_listen"`
-	OrderGRPCAddr    string     `json:"order_grpc_addr"`
-	OrderGRPCDialSec int        `json:"order_grpc_dial_seconds"`
-	Auth             AuthConfig `json:"auth"`
-	Log              LogConfig  `json:"log"`
+	HTTPListen            string      `json:"http_listen"`
+	OrderGRPCAddr         string      `json:"order_grpc_addr"`
+	OrderGRPCDialSec      int         `json:"order_grpc_dial_seconds"`
+	MarketDataGRPCAddr    string      `json:"marketdata_grpc_addr"`
+	MarketDataGRPCDialSec int         `json:"marketdata_grpc_dial_seconds"`
+	Redis                 RedisConfig `json:"redis"`
+	Auth                  AuthConfig  `json:"auth"`
+	Log                   LogConfig   `json:"log"`
+}
+
+type RedisConfig struct {
+	Addr     string `json:"addr"`
+	Password string `json:"password"`
+	DB       int    `json:"db"`
 }
 
 // AuthConfig Phase 1 静态 Bearer 鉴权（用户 ID 由请求传入，见 rest-api §2.2）。
@@ -74,6 +83,15 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.OrderGRPCDialSec <= 0 {
 		c.OrderGRPCDialSec = 10
 	}
+	if c.MarketDataGRPCAddr == "" {
+		c.MarketDataGRPCAddr = "localhost:50052"
+	}
+	if c.MarketDataGRPCDialSec <= 0 {
+		c.MarketDataGRPCDialSec = 10
+	}
+	if c.Redis.Addr == "" {
+		c.Redis.Addr = "localhost:6379"
+	}
 	if c.Auth.StaticToken == "" {
 		c.Auth.StaticToken = "dev-token-change-me"
 	}
@@ -114,6 +132,9 @@ func (c Config) validate() error {
 	}
 	if strings.TrimSpace(c.OrderGRPCAddr) == "" {
 		return fmt.Errorf("config: order_grpc_addr is required")
+	}
+	if strings.TrimSpace(c.MarketDataGRPCAddr) == "" {
+		return fmt.Errorf("config: marketdata_grpc_addr is required")
 	}
 	if strings.TrimSpace(c.Auth.StaticToken) == "" {
 		return fmt.Errorf("config: auth.static_token is required")

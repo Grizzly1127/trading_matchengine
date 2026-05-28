@@ -14,7 +14,11 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/client"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/server"
+	pushhub "github.com/Grizzly1127/trading_matchengine/internal/push/hub"
+	pushserver "github.com/Grizzly1127/trading_matchengine/internal/push/server"
+	pushsubscriber "github.com/Grizzly1127/trading_matchengine/internal/push/subscriber"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 )
 
 func main() {
@@ -57,12 +61,49 @@ func main() {
 		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderGRPCAddr).Msg("connect order service")
 	}
 	defer grpcClients.Close()
+	mdClients, err := client.ConnectMarketData(initCtx, cfg.MarketDataGRPCAddr, time.Duration(cfg.MarketDataGRPCDialSec)*time.Second)
+	if err != nil {
+		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataGRPCAddr).Msg("connect marketdata service")
+	}
+	defer mdClients.Close()
+	wsHub := pushhub.New()
+	rdb, err := redis.NewClient(redis.Config{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("init redis client")
+	}
+	defer rdb.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	wsServer := &pushserver.WSServer{
+		Hub:   wsHub,
+		Redis: rdb,
+		Token: cfg.Auth.StaticToken,
+		Log:   log.With().Str("component", "gateway_ws").Logger(),
+	}
+	wsSub := &pushsubscriber.RedisFanout{
+		Redis: rdb,
+		Hub:   wsHub,
+		Log:   log.With().Str("component", "gateway_ws_subscriber").Logger(),
+	}
+	go func() {
+		if err := wsSub.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("gateway ws subscriber stopped")
+			stop()
+		}
+	}()
 
 	router := server.NewRouter(server.Deps{
-		Log:     log,
-		Config:  cfg,
-		Order:   grpcClients.OrderClient,
-		Balance: grpcClients.BalanceClient,
+		Log:        log,
+		Config:     cfg,
+		Order:      grpcClients.OrderClient,
+		Balance:    grpcClients.BalanceClient,
+		MarketData: mdClients.Client,
+		WSHandler:  wsServer.HandleWS,
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListen,
@@ -70,14 +111,12 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
 		log.Info().
 			Str("config", *configPath).
 			Str("http_listen", cfg.HTTPListen).
 			Str("order_grpc_addr", cfg.OrderGRPCAddr).
+			Str("marketdata_grpc_addr", cfg.MarketDataGRPCAddr).
 			Msg("gateway ready")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("http serve")

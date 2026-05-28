@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package marketdata.v1;
+
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1;marketdatav1";
+
+import "common/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// MarketDataService 行情查询（深度、Ticker、参考价）。
+service MarketDataService {
+  rpc GetOrderBook(GetOrderBookRequest) returns (GetOrderBookResponse);
+  rpc GetTicker(GetTickerRequest) returns (GetTickerResponse);
+  rpc GetReferencePrice(GetReferencePriceRequest) returns (GetReferencePriceResponse);
+  rpc GetTickerAllSnapshot(GetTickerAllSnapshotRequest) returns (GetTickerAllSnapshotResponse);
+}
+
+// PriceLevel 盘口单档（价格 + 数量，十进制字符串）。
+message PriceLevel {
+  common.v1.Decimal price = 1;
+  common.v1.Decimal quantity = 2;
+}
+
+message GetOrderBookRequest {
+  string symbol = 1;
+  // 每边档位数，默认 20，最大 100。
+  int32 limit = 2;
+}
+
+message GetOrderBookResponse {
+  string symbol = 1;
+  uint64 last_update_id = 2;
+  repeated PriceLevel bids = 3;
+  repeated PriceLevel asks = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// Ticker 单交易对 24h 行情。
+message Ticker {
+  string symbol = 1;
+  common.v1.Decimal last_price = 2;
+  common.v1.Decimal open_price = 3;
+  common.v1.Decimal high_price = 4;
+  common.v1.Decimal low_price = 5;
+  common.v1.Decimal volume = 6;
+  common.v1.Decimal quote_volume = 7;
+  common.v1.Decimal price_change_percent = 8;
+  google.protobuf.Timestamp timestamp = 9;
+}
+
+message GetTickerRequest {
+  // symbol 与 symbols 二选一；symbols 最多 100 个。
+  string symbol = 1;
+  repeated string symbols = 2;
+}
+
+message GetTickerResponse {
+  // 单 symbol 查询时填充 ticker；批量查询时填充 items。
+  Ticker ticker = 1;
+  repeated Ticker items = 2;
+}
+
+// ReferencePriceKind 市价买单冻结等场景的参考价类型。
+enum ReferencePriceKind {
+  REFERENCE_PRICE_KIND_UNSPECIFIED = 0;
+  REFERENCE_PRICE_KIND_BEST_ASK = 1;
+  REFERENCE_PRICE_KIND_MARK = 2;
+  REFERENCE_PRICE_KIND_LAST = 3;
+}
+
+message GetReferencePriceRequest {
+  string symbol = 1;
+  ReferencePriceKind kind = 2;
+}
+
+message GetReferencePriceResponse {
+  common.v1.Decimal price = 1;
+  int64 updated_at_ms = 2;
+  // 降级后实际采用的参考价类型（如请求 BEST_ASK 无盘时用 LAST）。
+  ReferencePriceKind resolved_kind = 3;
+}
+
+message GetTickerAllSnapshotRequest {
+  // 过滤计价币，如 USDT；空表示全部 TRADING 交易对。
+  string quote_asset = 1;
+  // 若与服务端当前 snapshot_id 一致，响应 not_modified=true。
+  string snapshot_id = 2;
+}
+
+// TickerAllItem 全市场 Ticker 条目（与 REST/WS 短字段可对齐扩展）。
+message TickerAllItem {
+  string symbol = 1;
+  common.v1.Decimal last_price = 2;
+  common.v1.Decimal volume = 3;
+  common.v1.Decimal quote_volume = 4;
+  common.v1.Decimal price_change_percent = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message GetTickerAllSnapshotResponse {
+  string snapshot_id = 1;
+  google.protobuf.Timestamp snapshot_time = 2;
+  int32 count = 3;
+  repeated TickerAllItem items = 4;
+  bool not_modified = 5;
+}

@@ -9,13 +9,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/shopspring/decimal"
 	"google.golang.org/grpc"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/consumer"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/handler"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/marketdata"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/reconciler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
@@ -76,14 +79,22 @@ func main() {
 	repo := repository.New(pool)
 	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
 	defer writer.Close()
+	mdClient, err := marketdata.Connect(ctx, cfg.MarketData.GRPCAddr, time.Duration(cfg.MarketData.DialTimeoutSeconds)*time.Second)
+	if err != nil {
+		log.Fatal().Err(err).Str("grpc_addr", cfg.MarketData.GRPCAddr).Msg("connect marketdata")
+	}
+	mdClient.Timeout = time.Duration(cfg.MarketData.RequestTimeoutSeconds) * time.Second
+	defer mdClient.Close()
 
 	svc := &service.Service{
-		Repo:        repo,
-		OutboxTopic: cfg.Kafka.CommandTopic,
+		Repo:           repo,
+		OutboxTopic:    cfg.Kafka.CommandTopic,
+		MarketData:     mdClient,
+		SlippageBuffer: decimal.NewFromFloat(cfg.MarketData.SlippageBuffer),
 	}
 
 	grpcServer := grpc.NewServer()
-	orderv1.RegisterOrderServiceServer(grpcServer, &handler.Server{Svc: svc})
+	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: svc})
 	balanceSvc := &service.BalanceService{Repo: repo}
 	orderv1.RegisterBalanceServiceServer(grpcServer, &handler.BalanceServer{Svc: balanceSvc})
 

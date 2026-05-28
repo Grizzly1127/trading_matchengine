@@ -348,12 +348,14 @@ curl .../v1/orders/{id}      # 查询，可见成交状态
 
 ### 第 6 步：行情与推送（Phase 2，约 3～4 周）
 
+**详细计划**：[market-push-development-plan.md](./market-push-development-plan.md)（子任务、契约、验收清单、周计划）。
+
 **前置**：第 3 步已稳定发布 `trade.events` / `match.events`。
 
 | 顺序 | 模块 | 说明 |
 |------|------|------|
 | 6.1 | Market Data Service | 深度、Ticker；写 Redis；**供 Order 市价买单冻结查价**（见 [design/market-buy-freeze.md](./design/market-buy-freeze.md)） |
-| 6.2 | Push Service + Gateway WS | `depth:`、`ticker:` 频道 |
+| 6.2 | Push 模块 + Gateway WS | Gateway 暴露 `/v1/ws`；`depth:`、`ticker:` 频道（推送逻辑复用 `internal/push/*`） |
 | 6.3 | Kline Service | 消费 `trade.events` |
 | 6.4 | Index Price Service | 外部交易所 HTTP |
 | 6.5 | `ticker@all` | 做市商全市场；见 [rest-api.md §8.2](./rest-api.md#82-全市场-tickertickerall做市商) |

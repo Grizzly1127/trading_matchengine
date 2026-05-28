@@ -22,6 +22,11 @@ var ErrNotFound = errors.New("not found")
 
 // ErrFailedPrecondition 表示业务前置条件不满足。
 var ErrFailedPrecondition = errors.New("failed precondition")
+var ErrUnavailable = errors.New("unavailable")
+
+type ReferencePriceClient interface {
+	GetReferencePrice(ctx context.Context, symbol string) (string, error)
+}
 
 // OrderStore 订单持久化接口（便于测试）。
 type OrderStore interface {
@@ -34,8 +39,10 @@ type OrderStore interface {
 
 // Service 订单业务逻辑。
 type Service struct {
-	Repo        OrderStore
-	OutboxTopic string
+	Repo           OrderStore
+	OutboxTopic    string
+	MarketData     ReferencePriceClient
+	SlippageBuffer decimal.Decimal
 }
 
 // PlaceOrder 落库 PENDING、冻结余额并写入 order_outbox。
@@ -47,7 +54,7 @@ func (s *Service) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest
 		return nil, fmt.Errorf("%w: request is nil", ErrInvalidArgument)
 	}
 
-	in, err := validatePlaceOrder(req)
+	in, err := s.validatePlaceOrder(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -161,10 +168,10 @@ func (s *Service) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest
 
 func buildListOrdersFilter(req *orderv1.ListOrdersRequest) (repository.ListOrdersFilter, error) {
 	filter := repository.ListOrdersFilter{
-		UserID: req.GetUserId(),
-		Symbol: strings.TrimSpace(req.GetSymbol()),
-		Status: strings.TrimSpace(strings.ToUpper(req.GetStatus())),
-		Page:   int(req.GetPage()),
+		UserID:   req.GetUserId(),
+		Symbol:   strings.TrimSpace(req.GetSymbol()),
+		Status:   strings.TrimSpace(strings.ToUpper(req.GetStatus())),
+		Page:     int(req.GetPage()),
 		PageSize: int(req.GetPageSize()),
 	}
 
@@ -212,7 +219,7 @@ func isValidOrderStatus(status string) bool {
 	}
 }
 
-func validatePlaceOrder(req *orderv1.PlaceOrderRequest) (repository.InsertPendingInput, error) {
+func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (repository.InsertPendingInput, error) {
 	if req.GetUserId() == 0 {
 		return repository.InsertPendingInput{}, fmt.Errorf("%w: user_id is required", ErrInvalidArgument)
 	}
@@ -247,6 +254,9 @@ func validatePlaceOrder(req *orderv1.PlaceOrderRequest) (repository.InsertPendin
 	}
 
 	var pricePtr *string
+	var freezePricePtr *string
+	var freezeSlippagePtr *string
+	var frozenAmountPtr *string
 	if typ == commonv1.OrderType_ORDER_TYPE_LIMIT {
 		priceStr := strings.TrimSpace(req.GetPrice().GetValue())
 		price, err := decimal.NewFromString(priceStr)
@@ -255,19 +265,58 @@ func validatePlaceOrder(req *orderv1.PlaceOrderRequest) (repository.InsertPendin
 		}
 		s := price.String()
 		pricePtr = &s
+		if side == commonv1.Side_SIDE_BUY {
+			amt := price.Mul(qty).String()
+			frozenAmountPtr = &amt
+			freezePricePtr = &s
+		}
 	} else if side == commonv1.Side_SIDE_BUY {
-		// 临时：市价买必须带 price 作保护价。方案 C（行情估算）见 docs/design/market-buy-freeze.md。
-		return repository.InsertPendingInput{}, fmt.Errorf("%w: MARKET buy requires price for balance freeze", ErrInvalidArgument)
+		// 市价买：优先使用用户保护价；未提供时调用 Market Data 参考价。
+		var freezePrice decimal.Decimal
+		if req.GetPrice() != nil && strings.TrimSpace(req.GetPrice().GetValue()) != "" {
+			p, err := decimal.NewFromString(strings.TrimSpace(req.GetPrice().GetValue()))
+			if err != nil || !p.IsPositive() {
+				return repository.InsertPendingInput{}, fmt.Errorf("%w: invalid price", ErrInvalidArgument)
+			}
+			freezePrice = p
+		} else {
+			if s == nil || s.MarketData == nil {
+				return repository.InsertPendingInput{}, fmt.Errorf("%w: market data unavailable", ErrUnavailable)
+			}
+			ref, err := s.MarketData.GetReferencePrice(ctx, symbol)
+			if err != nil {
+				return repository.InsertPendingInput{}, fmt.Errorf("%w: market data reference price: %v", ErrUnavailable, err)
+			}
+			p, err := decimal.NewFromString(strings.TrimSpace(ref))
+			if err != nil || !p.IsPositive() {
+				return repository.InsertPendingInput{}, fmt.Errorf("%w: invalid market data reference price", ErrUnavailable)
+			}
+			freezePrice = p
+		}
+		slippage := s.SlippageBuffer
+		if slippage.IsNegative() {
+			slippage = decimal.Zero
+		}
+		freezeAmount := freezePrice.Mul(qty).Mul(decimal.NewFromInt(1).Add(slippage))
+		fp := freezePrice.String()
+		fs := slippage.String()
+		fa := freezeAmount.String()
+		freezePricePtr = &fp
+		freezeSlippagePtr = &fs
+		frozenAmountPtr = &fa
 	}
 
 	return repository.InsertPendingInput{
-		UserID:        req.GetUserId(),
-		ClientOrderID: clientOrderID,
-		Symbol:        symbol,
-		Side:          int16(side),
-		OrderType:     int16(typ),
-		Price:         pricePtr,
-		Quantity:      qty.String(),
+		UserID:         req.GetUserId(),
+		ClientOrderID:  clientOrderID,
+		Symbol:         symbol,
+		Side:           int16(side),
+		OrderType:      int16(typ),
+		Price:          pricePtr,
+		FreezePrice:    freezePricePtr,
+		FreezeSlippage: freezeSlippagePtr,
+		FrozenAmount:   frozenAmountPtr,
+		Quantity:       qty.String(),
 	}, nil
 }
 

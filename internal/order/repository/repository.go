@@ -26,6 +26,9 @@ type Order struct {
 	Side           int16
 	OrderType      int16
 	Price          *string
+	FreezePrice    *string
+	FreezeSlippage *string
+	FrozenAmount   *string
 	Quantity       string
 	FilledQuantity string
 	Status         string
@@ -93,7 +96,8 @@ func MigrateUp(ctx context.Context, pool *pgxpool.Pool) error {
 func (r *Repository) FindByClientOrderID(ctx context.Context, userID uint64, clientOrderID string) (*Order, error) {
 	const q = `
 SELECT o.id, o.user_id, o.client_order_id, o.symbol, o.side, o.order_type,
-       o.price::text, o.quantity::text, o.filled_quantity::text,
+       o.price::text, o.freeze_price::text, o.freeze_slippage::text, o.frozen_amount::text,
+       o.quantity::text, o.filled_quantity::text,
        o.status, o.version, o.created_at, o.updated_at
 FROM client_order_idempotency i
 JOIN orders o ON o.id = i.order_id
@@ -112,10 +116,11 @@ func (r *Repository) InsertPending(ctx context.Context, in InsertPendingInput) (
 	defer tx.Rollback(ctx)
 
 	const insertOrder = `
-INSERT INTO orders (user_id, client_order_id, symbol, side, order_type, price, quantity, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+INSERT INTO orders (user_id, client_order_id, symbol, side, order_type, price, freeze_price, freeze_slippage, frozen_amount, quantity, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING')
 RETURNING id, user_id, client_order_id, symbol, side, order_type,
-          price::text, quantity::text, filled_quantity::text,
+          price::text, freeze_price::text, freeze_slippage::text, frozen_amount::text,
+          quantity::text, filled_quantity::text,
           status, version, created_at, updated_at`
 
 	row := tx.QueryRow(ctx, insertOrder,
@@ -125,6 +130,9 @@ RETURNING id, user_id, client_order_id, symbol, side, order_type,
 		in.Side,
 		in.OrderType,
 		in.Price,
+		in.FreezePrice,
+		in.FreezeSlippage,
+		in.FrozenAmount,
 		in.Quantity,
 	)
 	order, err := scanOrder(row)
@@ -139,7 +147,7 @@ VALUES ($1, $2, $3)`
 		return nil, fmt.Errorf("insert idempotency: %w", err)
 	}
 
-	freeze, err := ComputeFreeze(in.Side, in.Symbol, in.Price, in.Quantity)
+	freeze, err := ComputeFreeze(in.Side, in.Symbol, in.Price, in.Quantity, in.FrozenAmount)
 	if err != nil {
 		return nil, fmt.Errorf("compute freeze: %w", err)
 	}
@@ -277,19 +285,25 @@ func (r *Repository) GetOrderStatus(ctx context.Context, orderID uint64) (string
 
 // InsertPendingInput 新订单写入参数。
 type InsertPendingInput struct {
-	UserID        uint64
-	ClientOrderID string
-	Symbol        string
-	Side          int16
-	OrderType     int16
-	Price         *string
-	Quantity      string
-	OutboxTopic   string
+	UserID         uint64
+	ClientOrderID  string
+	Symbol         string
+	Side           int16
+	OrderType      int16
+	Price          *string
+	FreezePrice    *string
+	FreezeSlippage *string
+	FrozenAmount   *string
+	Quantity       string
+	OutboxTopic    string
 }
 
 func scanOrder(row pgx.Row) (*Order, error) {
 	var o Order
 	var price *string
+	var freezePrice *string
+	var freezeSlippage *string
+	var frozenAmount *string
 	if err := row.Scan(
 		&o.ID,
 		&o.UserID,
@@ -298,6 +312,9 @@ func scanOrder(row pgx.Row) (*Order, error) {
 		&o.Side,
 		&o.OrderType,
 		&price,
+		&freezePrice,
+		&freezeSlippage,
+		&frozenAmount,
 		&o.Quantity,
 		&o.FilledQuantity,
 		&o.Status,
@@ -312,6 +329,15 @@ func scanOrder(row pgx.Row) (*Order, error) {
 	}
 	if price != nil && strings.TrimSpace(*price) != "" {
 		o.Price = price
+	}
+	if freezePrice != nil && strings.TrimSpace(*freezePrice) != "" {
+		o.FreezePrice = freezePrice
+	}
+	if freezeSlippage != nil && strings.TrimSpace(*freezeSlippage) != "" {
+		o.FreezeSlippage = freezeSlippage
+	}
+	if frozenAmount != nil && strings.TrimSpace(*frozenAmount) != "" {
+		o.FrozenAmount = frozenAmount
 	}
 	return &o, nil
 }

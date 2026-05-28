@@ -236,6 +236,8 @@
 | **职责**  | 管理客户端 WebSocket 长连接；订阅 Redis Pub/Sub；向对应客户端推送行情/订单/成交 |
 | **无状态** | 连接状态存 Redis，支持水平扩展                                    |
 
+> 实现说明：Phase 2 当前可先由 Gateway 进程内复用 `internal/push/*` 承接 `/v1/ws`，职责仍归于 Push 模块；后续可无缝拆分为独立 `cmd/push` 进程。
+
 
 ---
 

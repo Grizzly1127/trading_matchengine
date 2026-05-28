@@ -27,6 +27,25 @@ func TestAuth_PublicHealth(t *testing.T) {
 	}
 }
 
+func TestAuth_PublicMarketDepth(t *testing.T) {
+	var called bool
+	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/market/depth?symbol=BTC-USDT", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if !called {
+		t.Fatal("handler not called")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d", rec.Code)
+	}
+}
+
 func TestAuth_MissingToken(t *testing.T) {
 	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("should not reach handler")

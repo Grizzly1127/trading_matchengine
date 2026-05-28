@@ -1,10 +1,14 @@
 MODULE := github.com/tradingmatchengine/trading_matchengine
 BIN_DIR := bin
 
-.PHONY: help test test-race cover lint tidy build clean migrate-up
+.PHONY: help test test-race cover lint tidy build clean migrate-up gen-proto
+
+gen-proto:
+	@bash scripts/gen-proto.sh
 
 help:
 	@echo "Targets:"
+	@echo "  make gen-proto   - generate protobuf / gRPC code"
 	@echo "  make test        - run all tests"
 	@echo "  make test-race   - run tests with -race"
 	@echo "  make cover       - test coverage report"
@@ -32,6 +36,7 @@ build:
 	go build -o $(BIN_DIR)/matching ./cmd/matching
 	go build -o $(BIN_DIR)/order ./cmd/order
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
+	go build -o $(BIN_DIR)/push ./cmd/push
 
 build-matching:
 	@mkdir -p $(BIN_DIR)
@@ -44,6 +49,10 @@ build-order:
 build-gateway:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
+
+build-push:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/push ./cmd/push
 
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html

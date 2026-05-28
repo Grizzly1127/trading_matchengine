@@ -9,13 +9,21 @@ import (
 
 // Config 是 order 进程启动配置。
 type Config struct {
-	GRPCListen     string            `json:"grpc_listen"`
-	DatabaseURL    string            `json:"database_url"`
-	MigrateOnStart bool              `json:"migrate_on_start"`
-	DefaultSymbol  string            `json:"default_symbol"`
-	Kafka          KafkaConfig       `json:"kafka"`
-	Reconciler     ReconcilerConfig  `json:"reconciler"`
-	Log            LogConfig         `json:"log"`
+	GRPCListen     string           `json:"grpc_listen"`
+	DatabaseURL    string           `json:"database_url"`
+	MigrateOnStart bool             `json:"migrate_on_start"`
+	DefaultSymbol  string           `json:"default_symbol"`
+	MarketData     MarketDataConfig `json:"marketdata"`
+	Kafka          KafkaConfig      `json:"kafka"`
+	Reconciler     ReconcilerConfig `json:"reconciler"`
+	Log            LogConfig        `json:"log"`
+}
+
+type MarketDataConfig struct {
+	GRPCAddr              string  `json:"grpc_addr"`
+	DialTimeoutSeconds    int     `json:"dial_timeout_seconds"`
+	RequestTimeoutSeconds int     `json:"request_timeout_seconds"`
+	SlippageBuffer        float64 `json:"slippage_buffer"`
 }
 
 // ReconcilerConfig 超时补偿 scheduler（§4.5）。
@@ -90,6 +98,18 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 	if c.DefaultSymbol == "" {
 		c.DefaultSymbol = "BTC-USDT"
+	}
+	if c.MarketData.GRPCAddr == "" {
+		c.MarketData.GRPCAddr = "localhost:50052"
+	}
+	if c.MarketData.DialTimeoutSeconds <= 0 {
+		c.MarketData.DialTimeoutSeconds = 3
+	}
+	if c.MarketData.RequestTimeoutSeconds <= 0 {
+		c.MarketData.RequestTimeoutSeconds = 1
+	}
+	if c.MarketData.SlippageBuffer < 0 {
+		c.MarketData.SlippageBuffer = 0
 	}
 	if _, ok := raw["migrate_on_start"]; !ok {
 		c.MigrateOnStart = true

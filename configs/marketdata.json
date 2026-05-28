@@ -1,0 +1,38 @@
+{
+  "grpc_listen": ":50052",
+  "metrics_listen": ":9102",
+  "kafka": {
+    "brokers": ["localhost:9092"],
+    "command_topic": "order.commands",
+    "match_topic": "match.events",
+    "trade_topic": "trade.events",
+    "group_id": "marketdata-service",
+    "partition": 0,
+    "consumer_enabled": true,
+    "consumer_start_offset": -1
+  },
+  "publish": {
+    "depth_interval_ms": 100,
+    "depth_limit": 20,
+    "ticker_all_interval_ms": 500,
+    "ticker_all_quote_assets": ["USDT"]
+  },
+  "redis": {
+    "addr": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
+  "log": {
+    "level": "info",
+    "dev": true,
+    "file": "logs/marketdata.log",
+    "async": true,
+    "buffer_size": 512,
+    "max_size_mb": 100,
+    "max_age_days": 7,
+    "max_backups": 30,
+    "compress": true,
+    "local_time": true,
+    "rotate_daily": true
+  }
+}
