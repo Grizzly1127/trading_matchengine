@@ -3,6 +3,12 @@
   "database_url": "postgres://trading:trading@localhost:5432/trading?sslmode=disable",
   "migrate_on_start": true,
   "default_symbol": "BTC-USDT",
+  "marketdata": {
+    "grpc_addr": "localhost:50052",
+    "dial_timeout_seconds": 3,
+    "request_timeout_seconds": 1,
+    "slippage_buffer": 0.005
+  },
   "kafka": {
     "brokers": ["localhost:9092"],
     "command_topic": "order.commands",

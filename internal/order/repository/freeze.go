@@ -15,9 +15,9 @@ type FreezeSpec struct {
 	Amount decimal.Decimal
 }
 
-// ComputeFreeze 计算下单冻结（限价买卖、市价卖）。
-// 市价买：当前 Phase 1 要求 price 作临时保护价；目标方案见 docs/design/market-buy-freeze.md（方案 C，依赖 Market Data）。
-func ComputeFreeze(side int16, symbolName string, price *string, quantity string) (FreezeSpec, error) {
+// ComputeFreeze 计算下单冻结（限价买卖、市价卖、市价买）。
+// 若 frozenAmount 非空，买单优先按该冻结值（市价买方案 C）。
+func ComputeFreeze(side int16, symbolName string, price *string, quantity string, frozenAmount *string) (FreezeSpec, error) {
 	pair, err := ordersymbol.ParsePair(symbolName)
 	if err != nil {
 		return FreezeSpec{}, err
@@ -29,6 +29,13 @@ func ComputeFreeze(side int16, symbolName string, price *string, quantity string
 
 	switch commonv1.Side(side) {
 	case commonv1.Side_SIDE_BUY:
+		if frozenAmount != nil && *frozenAmount != "" {
+			a, err := decimal.NewFromString(*frozenAmount)
+			if err != nil || !a.IsPositive() {
+				return FreezeSpec{}, fmt.Errorf("invalid frozen_amount")
+			}
+			return FreezeSpec{Asset: pair.Quote, Amount: a}, nil
+		}
 		if price == nil || *price == "" {
 			return FreezeSpec{}, fmt.Errorf("price required to freeze quote for buy order")
 		}
@@ -70,6 +77,17 @@ func RemainingFreeze(o *Order) (FreezeSpec, error) {
 	case commonv1.Side_SIDE_SELL:
 		return FreezeSpec{Asset: pair.Base, Amount: remaining}, nil
 	case commonv1.Side_SIDE_BUY:
+		if o.FrozenAmount != nil && *o.FrozenAmount != "" {
+			total, err := decimal.NewFromString(*o.FrozenAmount)
+			if err != nil {
+				return FreezeSpec{}, err
+			}
+			if qty.IsZero() {
+				return FreezeSpec{}, nil
+			}
+			remainAmt := total.Mul(remaining).Div(qty)
+			return FreezeSpec{Asset: pair.Quote, Amount: remainAmt}, nil
+		}
 		if o.Price == nil || *o.Price == "" {
 			return FreezeSpec{}, fmt.Errorf("order price required to release buy freeze")
 		}

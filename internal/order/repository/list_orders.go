@@ -41,7 +41,8 @@ func (r *Repository) ListOrders(ctx context.Context, f ListOrdersFilter) ([]Orde
 	var b strings.Builder
 	b.WriteString(`
 SELECT id, user_id, client_order_id, symbol, side, order_type,
-       price::text, quantity::text, filled_quantity::text,
+       price::text, freeze_price::text, freeze_slippage::text, frozen_amount::text,
+       quantity::text, filled_quantity::text,
        status, version, created_at, updated_at
 FROM orders
 WHERE user_id = $1`)

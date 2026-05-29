@@ -1,0 +1,30 @@
+{
+  "grpc_listen": ":50053",
+  "database_url": "postgres://trading:trading@localhost:5432/trading?sslmode=disable",
+  "kafka": {
+    "brokers": ["localhost:9092"],
+    "trade_topic": "trade.events",
+    "group_id": "kline-service",
+    "partition": 0,
+    "consumer_enabled": true,
+    "consumer_start_offset": -1
+  },
+  "redis": {
+    "addr": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
+  "log": {
+    "level": "info",
+    "dev": true,
+    "file": "logs/kline.log",
+    "async": true,
+    "buffer_size": 512,
+    "max_size_mb": 100,
+    "max_age_days": 7,
+    "max_backups": 30,
+    "compress": true,
+    "local_time": true,
+    "rotate_daily": true
+  }
+}

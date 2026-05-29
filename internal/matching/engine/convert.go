@@ -30,7 +30,7 @@ func OrderFromProto(pb *commonv1.Order) (Order, error) {
 		return Order{}, err
 	}
 
-	price, err := decimalFromProto(pb.GetPrice(), "price")
+	price, err := priceFromOrderProto(pb)
 	if err != nil {
 		return Order{}, err
 	}
@@ -183,6 +183,17 @@ func effectiveRemaining(o Order) decimal.Decimal {
 		return o.Remaining
 	}
 	return o.Quantity
+}
+
+// priceFromOrderProto 限价单必须有 price；市价单允许缺省（撮合按对手盘价成交）。
+func priceFromOrderProto(pb *commonv1.Order) (decimal.Decimal, error) {
+	if pb.GetType() == commonv1.OrderType_ORDER_TYPE_MARKET {
+		if d := pb.GetPrice(); d != nil && d.GetValue() != "" {
+			return decimalFromProto(d, "price")
+		}
+		return decimal.Zero, nil
+	}
+	return decimalFromProto(pb.GetPrice(), "price")
 }
 
 func decimalFromProto(d *commonv1.Decimal, field string) (decimal.Decimal, error) {

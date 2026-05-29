@@ -1,4 +1,4 @@
-// API Gateway 进程入口（第 5 步：REST → Order gRPC）。
+// API Gateway 进程入口：REST → Order / MarketData / Kline gRPC。
 package main
 
 import (
@@ -15,6 +15,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/server"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 )
 
 func main() {
@@ -52,17 +53,36 @@ func main() {
 	log := logRes.Logger
 	initCtx := context.Background()
 
-	grpcClients, err := client.Connect(initCtx, cfg.OrderGRPCAddr, time.Duration(cfg.OrderGRPCDialSec)*time.Second)
+	grpcClients, err := client.ConnectOrder(initCtx, cfg.OrderService)
 	if err != nil {
-		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderGRPCAddr).Msg("connect order service")
+		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderService.GRPCAddr).Msg("connect order service")
 	}
 	defer grpcClients.Close()
+	mdClients, err := client.ConnectMarketData(initCtx, cfg.MarketDataService)
+	if err != nil {
+		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).Msg("connect marketdata service")
+	}
+	defer mdClients.Close()
+	var klineClient klinev1.KlineServiceClient
+	if cfg.KlineService.GRPCAddr != "" {
+		klClients, err := client.ConnectKline(initCtx, cfg.KlineService)
+		if err != nil {
+			log.Fatal().Err(err).Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).Msg("connect kline service")
+		}
+		defer klClients.Close()
+		klineClient = klClients.Client
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	router := server.NewRouter(server.Deps{
-		Log:     log,
-		Config:  cfg,
-		Order:   grpcClients.OrderClient,
-		Balance: grpcClients.BalanceClient,
+		Log:        log,
+		Config:     cfg,
+		Order:      grpcClients.OrderClient,
+		Balance:    grpcClients.BalanceClient,
+		MarketData: mdClients.Client,
+		Kline:      klineClient,
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListen,
@@ -70,14 +90,13 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
 		log.Info().
 			Str("config", *configPath).
 			Str("http_listen", cfg.HTTPListen).
-			Str("order_grpc_addr", cfg.OrderGRPCAddr).
+			Str("order_grpc_addr", cfg.OrderService.GRPCAddr).
+			Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).
+			Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).
 			Msg("gateway ready")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("http serve")

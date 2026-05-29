@@ -1,7 +1,17 @@
 {
   "http_listen": ":8080",
-  "order_grpc_addr": "localhost:50051",
-  "order_grpc_dial_seconds": 10,
+  "order_service": {
+    "grpc_addr": "localhost:50051",
+    "dial_seconds": 10
+  },
+  "marketdata_service": {
+    "grpc_addr": "localhost:50052",
+    "dial_seconds": 10
+  },
+  "kline_service": {
+    "grpc_addr": "localhost:50053",
+    "dial_seconds": 10
+  },
   "auth": {
     "static_token": "dev-token-change-me"
   },

@@ -18,7 +18,8 @@ func (r *Repository) GetOrderByID(ctx context.Context, orderID uint64) (*Order, 
 func (r *Repository) GetOrderByUser(ctx context.Context, userID, orderID uint64) (*Order, error) {
 	const q = `
 SELECT id, user_id, client_order_id, symbol, side, order_type,
-       price::text, quantity::text, filled_quantity::text,
+       price::text, freeze_price::text, freeze_slippage::text, frozen_amount::text,
+       quantity::text, filled_quantity::text,
        status, version, created_at, updated_at
 FROM orders
 WHERE id = $1 AND user_id = $2`
@@ -37,7 +38,8 @@ WHERE id = $1 AND user_id = $2`
 func getOrderByID(ctx context.Context, db queryRower, orderID uint64) (*Order, error) {
 	const q = `
 SELECT id, user_id, client_order_id, symbol, side, order_type,
-       price::text, quantity::text, filled_quantity::text,
+       price::text, freeze_price::text, freeze_slippage::text, frozen_amount::text,
+       quantity::text, filled_quantity::text,
        status, version, created_at, updated_at
 FROM orders
 WHERE id = $1`

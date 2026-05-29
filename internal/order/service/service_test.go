@@ -8,6 +8,7 @@ import (
 
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
+	"github.com/shopspring/decimal"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 )
@@ -16,6 +17,7 @@ type fakeStore struct {
 	byClient map[string]*repository.Order
 	byID     map[uint64]*repository.Order
 	nextID   uint64
+	lastIn   repository.InsertPendingInput
 }
 
 func (f *fakeStore) FindByClientOrderID(_ context.Context, userID uint64, clientOrderID string) (*repository.Order, error) {
@@ -27,6 +29,7 @@ func (f *fakeStore) FindByClientOrderID(_ context.Context, userID uint64, client
 }
 
 func (f *fakeStore) InsertPending(_ context.Context, in repository.InsertPendingInput) (*repository.Order, error) {
+	f.lastIn = in
 	f.nextID++
 	o := &repository.Order{
 		ID:            f.nextID,
@@ -42,6 +45,18 @@ func (f *fakeStore) InsertPending(_ context.Context, in repository.InsertPending
 	f.byClient[idemKey(in.UserID, in.ClientOrderID)] = o
 	f.byID[o.ID] = o
 	return o, nil
+}
+
+type fakeMarketData struct {
+	price string
+	err   error
+}
+
+func (f *fakeMarketData) GetReferencePrice(_ context.Context, _ string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.price, nil
 }
 
 func (f *fakeStore) GetOrderByUser(_ context.Context, userID, orderID uint64) (*repository.Order, error) {
@@ -93,7 +108,7 @@ func idemKey(userID uint64, clientOrderID string) string {
 
 func TestPlaceOrder_Success(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
-	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
+	svc := &Service{Repo: store, OutboxTopic: "order.commands", SlippageBuffer: decimal.Zero}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -119,7 +134,7 @@ func TestPlaceOrder_Success(t *testing.T) {
 
 func TestPlaceOrder_Idempotent(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
-	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
+	svc := &Service{Repo: store, OutboxTopic: "order.commands", SlippageBuffer: decimal.Zero}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -146,8 +161,9 @@ func TestPlaceOrder_Idempotent(t *testing.T) {
 
 func TestPlaceOrder_InvalidArgument(t *testing.T) {
 	svc := &Service{
-		Repo:        &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)},
-		OutboxTopic: "order.commands",
+		Repo:           &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)},
+		OutboxTopic:    "order.commands",
+		SlippageBuffer: decimal.Zero,
 	}
 
 	_, err := svc.PlaceOrder(context.Background(), &orderv1.PlaceOrderRequest{
@@ -197,5 +213,62 @@ func TestGetOrder_NotFound(t *testing.T) {
 	_, err := svc.GetOrder(context.Background(), &orderv1.GetOrderRequest{UserId: 1, OrderId: 99})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestPlaceOrder_MarketBuyWithoutPrice_UsesMarketData(t *testing.T) {
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
+	svc := &Service{
+		Repo:           store,
+		OutboxTopic:    "order.commands",
+		MarketData:     &fakeMarketData{price: "100"},
+		SlippageBuffer: decimal.RequireFromString("0.01"),
+	}
+
+	req := &orderv1.PlaceOrderRequest{
+		UserId:        1,
+		ClientOrderId: "m1",
+		Symbol:        "BTC-USDT",
+		Side:          commonv1.Side_SIDE_BUY,
+		Type:          commonv1.OrderType_ORDER_TYPE_MARKET,
+		Quantity:      &commonv1.Decimal{Value: "2"},
+	}
+	_, err := svc.PlaceOrder(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlaceOrder: %v", err)
+	}
+	if store.lastIn.Price != nil {
+		t.Fatalf("market buy should not persist order price, got %v", *store.lastIn.Price)
+	}
+	if store.lastIn.FreezePrice == nil || *store.lastIn.FreezePrice != "100" {
+		t.Fatalf("freeze_price=%v", store.lastIn.FreezePrice)
+	}
+	if store.lastIn.FrozenAmount == nil || *store.lastIn.FrozenAmount != "202" {
+		t.Fatalf("frozen_amount=%v", store.lastIn.FrozenAmount)
+	}
+	if store.lastIn.FreezeSlippage == nil || *store.lastIn.FreezeSlippage != "0.01" {
+		t.Fatalf("freeze_slippage=%v", store.lastIn.FreezeSlippage)
+	}
+}
+
+func TestPlaceOrder_MarketDataUnavailable_ReturnsUnavailable(t *testing.T) {
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
+	svc := &Service{
+		Repo:           store,
+		OutboxTopic:    "order.commands",
+		MarketData:     &fakeMarketData{err: errors.New("dial timeout")},
+		SlippageBuffer: decimal.Zero,
+	}
+	req := &orderv1.PlaceOrderRequest{
+		UserId:        1,
+		ClientOrderId: "m2",
+		Symbol:        "BTC-USDT",
+		Side:          commonv1.Side_SIDE_BUY,
+		Type:          commonv1.OrderType_ORDER_TYPE_MARKET,
+		Quantity:      &commonv1.Decimal{Value: "2"},
+	}
+	_, err := svc.PlaceOrder(context.Background(), req)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
 }

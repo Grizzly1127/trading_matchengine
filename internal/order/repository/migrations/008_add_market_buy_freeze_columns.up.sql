@@ -1,0 +1,4 @@
+ALTER TABLE orders
+    ADD COLUMN IF NOT EXISTS freeze_price NUMERIC(36, 18),
+    ADD COLUMN IF NOT EXISTS freeze_slippage NUMERIC(18, 8),
+    ADD COLUMN IF NOT EXISTS frozen_amount NUMERIC(36, 18);

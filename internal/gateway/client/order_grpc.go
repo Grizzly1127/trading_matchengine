@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -21,16 +22,17 @@ type OrderGRPC struct {
 }
 
 // Connect 建立 gRPC 连接并等待 Ready（带超时）。
-func Connect(ctx context.Context, addr string, dialTimeout time.Duration) (*OrderGRPC, error) {
+func ConnectOrder(ctx context.Context, service config.ServiceConfig) (*OrderGRPC, error) {
+	dialTimeout := time.Duration(service.GRPCDialSec) * time.Second
 	if dialTimeout <= 0 {
 		dialTimeout = defaultDialTimeout
 	}
 
-	conn, err := grpc.NewClient(addr,
+	conn, err := grpc.NewClient(service.GRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("grpc new client %q: %w", addr, err)
+		return nil, fmt.Errorf("grpc new client %q: %w", service.GRPCAddr, err)
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
@@ -38,7 +40,7 @@ func Connect(ctx context.Context, addr string, dialTimeout time.Duration) (*Orde
 
 	if err := waitReady(dialCtx, conn); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("grpc connect %q: %w", addr, err)
+		return nil, fmt.Errorf("grpc connect %q: %w", service.GRPCAddr, err)
 	}
 
 	return &OrderGRPC{

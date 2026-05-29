@@ -6,16 +6,20 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/handler"
 	gwmw "github.com/Grizzly1127/trading_matchengine/internal/gateway/middleware"
+	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
+	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 )
 
 type Deps struct {
-	Log     zerolog.Logger
-	Config  config.Config
-	Order   orderv1.OrderServiceClient
-	Balance orderv1.BalanceServiceClient
+	Log        zerolog.Logger
+	Config     config.Config
+	Order      orderv1.OrderServiceClient
+	Balance    orderv1.BalanceServiceClient
+	MarketData marketdatav1.MarketDataServiceClient
+	Kline      klinev1.KlineServiceClient
 }
 
 // NewRouter 注册路由与中间件链：RequestID → Auth → Recover → AccessLog。
@@ -39,6 +43,15 @@ func NewRouter(deps Deps) http.Handler {
 	r.Post("/v1/balances", balanceH.UpdateBalance)
 	r.Get("/v1/balances", balanceH.ListBalances)
 	r.Get("/v1/balances/{asset}", balanceH.GetBalance)
+
+	marketH := &handler.Market{MarketData: deps.MarketData, Log: deps.Log}
+	r.Get("/v1/market/depth", marketH.Depth)
+	r.Get("/v1/market/ticker", marketH.Ticker)
+
+	if deps.Kline != nil {
+		klineH := &handler.Kline{Client: deps.Kline, Log: deps.Log}
+		r.Get("/v1/klines", klineH.List)
+	}
 
 	return r
 }

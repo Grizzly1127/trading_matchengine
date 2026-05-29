@@ -37,7 +37,7 @@ func isPublicRoute(method, path string) bool {
 		return false
 	}
 	switch path {
-	case "/v1/health", "/v1/time":
+	case "/v1/health", "/v1/time", "/v1/market/depth", "/v1/market/ticker":
 		return true
 	default:
 		return false

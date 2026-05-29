@@ -69,7 +69,8 @@ WHERE id = $2 AND user_id = $3 AND status = ANY($4) AND version = $5`
 func getOrderForUpdateByUser(ctx context.Context, tx pgx.Tx, userID, orderID uint64) (*Order, error) {
 	const q = `
 SELECT id, user_id, client_order_id, symbol, side, order_type,
-       price::text, quantity::text, filled_quantity::text,
+       price::text, freeze_price::text, freeze_slippage::text, frozen_amount::text,
+       quantity::text, filled_quantity::text,
        status, version, created_at, updated_at
 FROM orders
 WHERE id = $1 AND user_id = $2

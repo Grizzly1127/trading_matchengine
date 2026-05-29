@@ -134,10 +134,11 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 		Str("command_topic", cfg.Kafka.CommandTopic).
 		Msg("kafka consumer starting")
 
+	// Matching 以 WAL 维护 kafka 位点，不用 consumer group（避免 __consumer_offsets 残留导致空 WAL 仍重放历史）。
 	reader, err := kafka.NewCommandReader(kafka.ReaderConfig{
 		Brokers:     cfg.Kafka.Brokers,
 		Topic:       cfg.Kafka.CommandTopic,
-		GroupID:     cfg.Kafka.GroupID,
+		GroupID:     "",
 		Partition:   partition,
 		StartOffset: start,
 	})

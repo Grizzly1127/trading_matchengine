@@ -124,6 +124,22 @@ func TestOrderFromProto_rejectsMissingPrice(t *testing.T) {
 	}
 }
 
+func TestOrderFromProto_marketWithoutPrice(t *testing.T) {
+	got, err := OrderFromProto(&commonv1.Order{
+		OrderId:  2,
+		Symbol:   "BTC-USDT",
+		Side:     commonv1.Side_SIDE_BUY,
+		Type:     commonv1.OrderType_ORDER_TYPE_MARKET,
+		Quantity: &commonv1.Decimal{Value: "1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != OrderTypeMarket || !got.Price.IsZero() {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
 func TestOrderFromProto_rejectsNil(t *testing.T) {
 	if _, err := OrderFromProto(nil); err == nil {
 		t.Fatal("expected error")
