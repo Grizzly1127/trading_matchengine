@@ -236,7 +236,7 @@
 | **职责**  | 管理客户端 WebSocket 长连接；订阅 Redis Pub/Sub；向对应客户端推送行情/订单/成交 |
 | **无状态** | 连接状态存 Redis，支持水平扩展                                    |
 
-> 实现说明：Phase 2 当前可先由 Gateway 进程内复用 `internal/push/*` 承接 `/v1/ws`，职责仍归于 Push 模块；后续可无缝拆分为独立 `cmd/push` 进程。
+> 实现说明：WebSocket 由独立 `cmd/push` 进程暴露 `/v1/ws`（默认 `:8081`）；Gateway（`:8080`）仅提供 REST。`internal/push/*` 为 Push 服务实现模块。
 
 
 ---
@@ -616,6 +616,7 @@ Step 3: 从 Kafka 续消费
 
 ### 6.2 Kafka（事件总线）
 
+详细 Topic 契约、消息体与消费者矩阵见 **[kafka-data.md](./kafka-data.md)**。
 
 | Topic            | Partitions   | 保留  | 说明                                        |
 | ---------------- | ------------ | --- | ----------------------------------------- |
@@ -636,6 +637,7 @@ Step 3: 从 Kafka 续消费
 
 ### 6.3 Redis（缓存/实时状态）
 
+Key / Pub/Sub 契约、JSON 载荷与读写方矩阵见 **[redis-data.md](./redis-data.md)**。
 
 | Key 模式                               | 用途             | TTL         |
 | ------------------------------------ | -------------- | ----------- |

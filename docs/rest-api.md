@@ -35,7 +35,7 @@
 | --------------- | ------------------------------------------------------- |
 | **谁调用 Gateway** | Web/BFF、运营后台、清算服务；**不是**浏览器直连（生产）                       |
 | **Phase 1 联调**  | 常在本机 `localhost:8080` 用 Bearer 测通；等价于「内网调用方」，不代表对终端用户开放 |
-| **WebSocket**   | Phase 2+：`GET /v1/ws` 由 Gateway 管理连接，数据来自 Push / Redis  |
+| **WebSocket**   | Phase 2+：由 **Push** 提供 `/v1/ws`；生产可由 Nginx 统一入口反代（见 `deploy/nginx/`） |
 
 
 ### 1.2 与 Web / BFF 的职责边界
@@ -858,7 +858,7 @@ GET /v1/time
 
 ## 8. WebSocket
 
-REST 负责命令；**实时数据**走 WebSocket，由 Gateway / Push Service 暴露（Phase 2+）。
+REST 走 Gateway；**实时数据**走 WebSocket，由 **Push Service** 提供（`cmd/push`，默认 `:8081`）。对外可用 Nginx 将 `https://api.example.com/v1/ws` 反代至 Push，与 REST 同域（见 [deploy/nginx/README.md](../deploy/nginx/README.md)）。
 
 
 | 项               | 值                                                 |

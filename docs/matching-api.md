@@ -3,7 +3,7 @@
 **版本**: 1.0  
 **日期**: 2026-05-22  
 **状态**: 与当前代码一致（第 3 步）  
-**关联**: [matching-message-flow.md](./matching-message-flow.md) · [architecture-spec.md](./architecture-spec.md)
+**关联**: [kafka-data.md](./kafka-data.md) · [architecture-spec.md](./architecture-spec.md)
 
 Matching Engine（`cmd/matching`）是**撮合执行服务**，对外不提供 HTTP/gRPC。与上下游的契约主要是：
 

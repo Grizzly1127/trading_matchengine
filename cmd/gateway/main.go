@@ -1,4 +1,4 @@
-// API Gateway 进程入口（第 5 步：REST → Order gRPC）。
+// API Gateway 进程入口：REST → Order / MarketData / Kline gRPC。
 package main
 
 import (
@@ -14,11 +14,8 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/client"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/server"
-	pushhub "github.com/Grizzly1127/trading_matchengine/internal/push/hub"
-	pushserver "github.com/Grizzly1127/trading_matchengine/internal/push/server"
-	pushsubscriber "github.com/Grizzly1127/trading_matchengine/internal/push/subscriber"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
-	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
+	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 )
 
 func main() {
@@ -56,46 +53,28 @@ func main() {
 	log := logRes.Logger
 	initCtx := context.Background()
 
-	grpcClients, err := client.Connect(initCtx, cfg.OrderGRPCAddr, time.Duration(cfg.OrderGRPCDialSec)*time.Second)
+	grpcClients, err := client.ConnectOrder(initCtx, cfg.OrderService)
 	if err != nil {
-		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderGRPCAddr).Msg("connect order service")
+		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderService.GRPCAddr).Msg("connect order service")
 	}
 	defer grpcClients.Close()
-	mdClients, err := client.ConnectMarketData(initCtx, cfg.MarketDataGRPCAddr, time.Duration(cfg.MarketDataGRPCDialSec)*time.Second)
+	mdClients, err := client.ConnectMarketData(initCtx, cfg.MarketDataService)
 	if err != nil {
-		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataGRPCAddr).Msg("connect marketdata service")
+		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).Msg("connect marketdata service")
 	}
 	defer mdClients.Close()
-	wsHub := pushhub.New()
-	rdb, err := redis.NewClient(redis.Config{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-	if err != nil {
-		log.Fatal().Err(err).Msg("init redis client")
+	var klineClient klinev1.KlineServiceClient
+	if cfg.KlineService.GRPCAddr != "" {
+		klClients, err := client.ConnectKline(initCtx, cfg.KlineService)
+		if err != nil {
+			log.Fatal().Err(err).Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).Msg("connect kline service")
+		}
+		defer klClients.Close()
+		klineClient = klClients.Client
 	}
-	defer rdb.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	wsServer := &pushserver.WSServer{
-		Hub:   wsHub,
-		Redis: rdb,
-		Token: cfg.Auth.StaticToken,
-		Log:   log.With().Str("component", "gateway_ws").Logger(),
-	}
-	wsSub := &pushsubscriber.RedisFanout{
-		Redis: rdb,
-		Hub:   wsHub,
-		Log:   log.With().Str("component", "gateway_ws_subscriber").Logger(),
-	}
-	go func() {
-		if err := wsSub.Run(ctx); err != nil && ctx.Err() == nil {
-			log.Error().Err(err).Msg("gateway ws subscriber stopped")
-			stop()
-		}
-	}()
 
 	router := server.NewRouter(server.Deps{
 		Log:        log,
@@ -103,7 +82,7 @@ func main() {
 		Order:      grpcClients.OrderClient,
 		Balance:    grpcClients.BalanceClient,
 		MarketData: mdClients.Client,
-		WSHandler:  wsServer.HandleWS,
+		Kline:      klineClient,
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListen,
@@ -115,8 +94,9 @@ func main() {
 		log.Info().
 			Str("config", *configPath).
 			Str("http_listen", cfg.HTTPListen).
-			Str("order_grpc_addr", cfg.OrderGRPCAddr).
-			Str("marketdata_grpc_addr", cfg.MarketDataGRPCAddr).
+			Str("order_grpc_addr", cfg.OrderService.GRPCAddr).
+			Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).
+			Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).
 			Msg("gateway ready")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("http serve")

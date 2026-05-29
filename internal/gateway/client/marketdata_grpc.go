@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -17,16 +18,17 @@ type MarketDataGRPC struct {
 	Client marketdatav1.MarketDataServiceClient
 }
 
-func ConnectMarketData(ctx context.Context, addr string, dialTimeout time.Duration) (*MarketDataGRPC, error) {
+func ConnectMarketData(ctx context.Context, service config.ServiceConfig) (*MarketDataGRPC, error) {
+	dialTimeout := time.Duration(service.GRPCDialSec) * time.Second
 	if dialTimeout <= 0 {
 		dialTimeout = defaultDialTimeout
 	}
 
-	conn, err := grpc.NewClient(addr,
+	conn, err := grpc.NewClient(service.GRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("grpc new client %q: %w", addr, err)
+		return nil, fmt.Errorf("grpc new client %q: %w", service.GRPCAddr, err)
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
@@ -34,7 +36,7 @@ func ConnectMarketData(ctx context.Context, addr string, dialTimeout time.Durati
 
 	if err := waitMarketDataReady(dialCtx, conn); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("grpc connect %q: %w", addr, err)
+		return nil, fmt.Errorf("grpc connect %q: %w", service.GRPCAddr, err)
 	}
 
 	return &MarketDataGRPC{

@@ -37,6 +37,8 @@ build:
 	go build -o $(BIN_DIR)/order ./cmd/order
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
 	go build -o $(BIN_DIR)/push ./cmd/push
+	go build -o $(BIN_DIR)/kline ./cmd/kline
+	go build -o $(BIN_DIR)/marketdata ./cmd/marketdata
 
 build-matching:
 	@mkdir -p $(BIN_DIR)
@@ -53,6 +55,14 @@ build-gateway:
 build-push:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/push ./cmd/push
+
+build-kline:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/kline ./cmd/kline
+
+build-marketdata:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/marketdata ./cmd/marketdata
 
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html
