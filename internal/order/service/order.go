@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 )
@@ -37,16 +38,28 @@ type OrderStore interface {
 	ListOrders(ctx context.Context, filter repository.ListOrdersFilter) ([]repository.Order, error)
 }
 
-// Service 订单业务逻辑。
-type Service struct {
+// OrderService 订单业务逻辑。
+type OrderService struct {
 	Repo           OrderStore
 	OutboxTopic    string
 	MarketData     ReferencePriceClient
 	SlippageBuffer decimal.Decimal
+	Symbols        *symbolrules.Registry
+}
+
+func (s *OrderService) symbolRules(symbolName string) (symbolrules.Spec, error) {
+	if s != nil && s.Symbols != nil {
+		return s.Symbols.Lookup(symbolName)
+	}
+	reg, err := symbolrules.DefaultRegistry()
+	if err != nil {
+		return symbolrules.Spec{}, err
+	}
+	return reg.Lookup(symbolName)
 }
 
 // PlaceOrder 落库 PENDING、冻结余额并写入 order_outbox。
-func (s *Service) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (*orderv1.PlaceOrderResponse, error) {
+func (s *OrderService) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (*orderv1.PlaceOrderResponse, error) {
 	if s == nil || s.Repo == nil {
 		return nil, fmt.Errorf("order service not configured")
 	}
@@ -80,7 +93,7 @@ func (s *Service) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest
 }
 
 // CancelOrder 将订单置为 CANCELING 并写入撤单 Outbox。
-func (s *Service) CancelOrder(ctx context.Context, req *orderv1.CancelOrderRequest) (*orderv1.CancelOrderResponse, error) {
+func (s *OrderService) CancelOrder(ctx context.Context, req *orderv1.CancelOrderRequest) (*orderv1.CancelOrderResponse, error) {
 	if s == nil || s.Repo == nil {
 		return nil, fmt.Errorf("order service not configured")
 	}
@@ -113,7 +126,7 @@ func (s *Service) CancelOrder(ctx context.Context, req *orderv1.CancelOrderReque
 }
 
 // GetOrder 查询订单详情。
-func (s *Service) GetOrder(ctx context.Context, req *orderv1.GetOrderRequest) (*orderv1.GetOrderResponse, error) {
+func (s *OrderService) GetOrder(ctx context.Context, req *orderv1.GetOrderRequest) (*orderv1.GetOrderResponse, error) {
 	if s == nil || s.Repo == nil {
 		return nil, fmt.Errorf("order service not configured")
 	}
@@ -138,7 +151,7 @@ func (s *Service) GetOrder(ctx context.Context, req *orderv1.GetOrderRequest) (*
 }
 
 // ListOrders 查询订单列表（筛选条件均可选，仅 user_id 必填）。
-func (s *Service) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest) (*orderv1.ListOrdersResponse, error) {
+func (s *OrderService) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest) (*orderv1.ListOrdersResponse, error) {
 	if s == nil || s.Repo == nil {
 		return nil, fmt.Errorf("order service not configured")
 	}
@@ -219,7 +232,7 @@ func isValidOrderStatus(status string) bool {
 	}
 }
 
-func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (repository.InsertPendingInput, error) {
+func (s *OrderService) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (repository.InsertPendingInput, error) {
 	if req.GetUserId() == 0 {
 		return repository.InsertPendingInput{}, fmt.Errorf("%w: user_id is required", ErrInvalidArgument)
 	}
@@ -247,11 +260,21 @@ func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrde
 		return repository.InsertPendingInput{}, fmt.Errorf("%w: type must be LIMIT or MARKET", ErrInvalidArgument)
 	}
 
+	spec, err := s.symbolRules(symbol)
+	if err != nil {
+		return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+	}
+
 	qtyStr := strings.TrimSpace(req.GetQuantity().GetValue())
 	qty, err := decimal.NewFromString(qtyStr)
 	if err != nil || !qty.IsPositive() {
 		return repository.InsertPendingInput{}, fmt.Errorf("%w: quantity must be positive decimal", ErrInvalidArgument)
 	}
+	qtyNorm, err := spec.ValidateQuantity(qty)
+	if err != nil {
+		return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+	}
+	qty, _ = decimal.NewFromString(qtyNorm)
 
 	var pricePtr *string
 	var freezePricePtr *string
@@ -263,12 +286,19 @@ func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrde
 		if err != nil || !price.IsPositive() {
 			return repository.InsertPendingInput{}, fmt.Errorf("%w: price must be positive decimal for LIMIT", ErrInvalidArgument)
 		}
-		s := price.String()
-		pricePtr = &s
+		priceNorm, err := spec.ValidatePrice(price)
+		if err != nil {
+			return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+		}
+		price, _ = decimal.NewFromString(priceNorm)
+		if err := spec.CheckMinNotional(price, qty); err != nil {
+			return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+		}
+		pricePtr = &priceNorm
 		if side == commonv1.Side_SIDE_BUY {
 			amt := price.Mul(qty).String()
 			frozenAmountPtr = &amt
-			freezePricePtr = &s
+			freezePricePtr = &priceNorm
 		}
 	} else if side == commonv1.Side_SIDE_BUY {
 		// 市价买：优先使用用户保护价；未提供时调用 Market Data 参考价。
@@ -278,7 +308,11 @@ func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrde
 			if err != nil || !p.IsPositive() {
 				return repository.InsertPendingInput{}, fmt.Errorf("%w: invalid price", ErrInvalidArgument)
 			}
-			freezePrice = p
+			priceNorm, err := spec.ValidatePrice(p)
+			if err != nil {
+				return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+			}
+			freezePrice, _ = decimal.NewFromString(priceNorm)
 		} else {
 			if s == nil || s.MarketData == nil {
 				return repository.InsertPendingInput{}, fmt.Errorf("%w: market data unavailable", ErrUnavailable)
@@ -291,7 +325,14 @@ func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrde
 			if err != nil || !p.IsPositive() {
 				return repository.InsertPendingInput{}, fmt.Errorf("%w: invalid market data reference price", ErrUnavailable)
 			}
-			freezePrice = p
+			priceNorm, err := spec.CeilPrice(p)
+			if err != nil {
+				return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+			}
+			freezePrice, _ = decimal.NewFromString(priceNorm)
+		}
+		if err := spec.CheckMinNotional(freezePrice, qty); err != nil {
+			return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 		}
 		slippage := s.SlippageBuffer
 		if slippage.IsNegative() {
@@ -316,7 +357,7 @@ func (s *Service) validatePlaceOrder(ctx context.Context, req *orderv1.PlaceOrde
 		FreezePrice:    freezePricePtr,
 		FreezeSlippage: freezeSlippagePtr,
 		FrozenAmount:   frozenAmountPtr,
-		Quantity:       qty.String(),
+		Quantity:       qtyNorm,
 	}, nil
 }
 

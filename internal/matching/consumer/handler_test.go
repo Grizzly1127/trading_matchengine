@@ -10,12 +10,23 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"google.golang.org/protobuf/proto"
 )
 
+func testRecoveryConfig(dir string) recovery.Config {
+	reg, _ := symbolrules.DefaultRegistry()
+	return recovery.Config{
+		ShardID:        "shard-0",
+		DataDir:        dir,
+		SnapshotEvery:  1000,
+		SymbolRegistry: reg,
+	}
+}
+
 func TestHandler_newOrderPublishesEvents(t *testing.T) {
 	dir := t.TempDir()
-	eng, err := recovery.Open(recovery.Config{ShardID: "shard-0", DataDir: dir, SnapshotEvery: 1000})
+	eng, err := recovery.Open(testRecoveryConfig(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +65,7 @@ func TestHandler_newOrderPublishesEvents(t *testing.T) {
 
 func TestHandler_duplicateDoesNotPublish(t *testing.T) {
 	dir := t.TempDir()
-	eng, err := recovery.Open(recovery.Config{ShardID: "shard-0", DataDir: dir, SnapshotEvery: 1000})
+	eng, err := recovery.Open(testRecoveryConfig(dir))
 	if err != nil {
 		t.Fatal(err)
 	}

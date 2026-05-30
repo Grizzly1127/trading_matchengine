@@ -29,7 +29,11 @@ go.work.sum
 !.env.example
 /data/
 /run/
+/logs/
 *.log
+*.log.gz
+*.stdout
+*.stderr
 
 # Proto generated (uncomment when using buf/protoc)
 # proto/**/*.pb.go

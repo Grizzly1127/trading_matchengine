@@ -76,7 +76,13 @@ func main() {
 		log.Info().Msg("database migration applied")
 	}
 
-	repo := repository.New(pool)
+	rulesCfg, err := cfg.LoadRules()
+	if err != nil {
+		log.Fatal().Err(err).Msg("symbol rules")
+	}
+
+	repo := repository.New(pool, rulesCfg.Assets)
+
 	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
 	defer writer.Close()
 	mdClient, err := marketdata.Connect(ctx, cfg.MarketData.GRPCAddr, time.Duration(cfg.MarketData.DialTimeoutSeconds)*time.Second)
@@ -86,14 +92,15 @@ func main() {
 	mdClient.Timeout = time.Duration(cfg.MarketData.RequestTimeoutSeconds) * time.Second
 	defer mdClient.Close()
 
-	svc := &service.Service{
+	grpcServer := grpc.NewServer()
+
+	svc := &service.OrderService{
 		Repo:           repo,
 		OutboxTopic:    cfg.Kafka.CommandTopic,
 		MarketData:     mdClient,
 		SlippageBuffer: decimal.NewFromFloat(cfg.MarketData.SlippageBuffer),
+		Symbols:        rulesCfg.Registry,
 	}
-
-	grpcServer := grpc.NewServer()
 	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: svc})
 	balanceSvc := &service.BalanceService{Repo: repo}
 	orderv1.RegisterBalanceServiceServer(grpcServer, &handler.BalanceServer{Svc: balanceSvc})

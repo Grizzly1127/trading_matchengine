@@ -14,8 +14,10 @@ type Config struct {
 	SnapshotEvery  uint64      `json:"snapshot_every"`
 	SnapshotOnExit bool        `json:"snapshot_on_exit"`
 	CommandsFile   string      `json:"commands_file"`
-	DefaultSymbol  string      `json:"default_symbol"`
-	Kafka          KafkaConfig `json:"kafka"`
+	DefaultSymbol  string                      `json:"default_symbol"`
+	SymbolsFile    string                      `json:"symbols_file"`
+	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
+	Kafka          KafkaConfig                 `json:"kafka"`
 	Log            LogConfig   `json:"log"`
 }
 
@@ -92,6 +94,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		c.DefaultSymbol = "BTC-USDT"
 	}
 	c.applyKafkaDefaults(raw)
+	c.applySymbolDefaults()
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}

@@ -4,6 +4,7 @@
   "snapshot_every": 10000,
   "snapshot_on_exit": true,
   "default_symbol": "BTC-USDT",
+  "symbols_file": "configs/symbols.json",
   "kafka": {
     "enabled": true,
     "brokers": ["localhost:9092"],

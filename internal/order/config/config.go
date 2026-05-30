@@ -9,14 +9,16 @@ import (
 
 // Config 是 order 进程启动配置。
 type Config struct {
-	GRPCListen     string           `json:"grpc_listen"`
-	DatabaseURL    string           `json:"database_url"`
-	MigrateOnStart bool             `json:"migrate_on_start"`
-	DefaultSymbol  string           `json:"default_symbol"`
-	MarketData     MarketDataConfig `json:"marketdata"`
-	Kafka          KafkaConfig      `json:"kafka"`
-	Reconciler     ReconcilerConfig `json:"reconciler"`
-	Log            LogConfig        `json:"log"`
+	GRPCListen     string                      `json:"grpc_listen"`
+	DatabaseURL    string                      `json:"database_url"`
+	MigrateOnStart bool                        `json:"migrate_on_start"`
+	DefaultSymbol  string                      `json:"default_symbol"`
+	SymbolsFile    string                      `json:"symbols_file"`
+	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
+	MarketData     MarketDataConfig            `json:"marketdata"`
+	Kafka          KafkaConfig                 `json:"kafka"`
+	Reconciler     ReconcilerConfig            `json:"reconciler"`
+	Log            LogConfig                   `json:"log"`
 }
 
 type MarketDataConfig struct {
@@ -116,6 +118,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 	c.applyKafkaDefaults(raw)
 	c.applyReconcilerDefaults(raw)
+	c.applySymbolDefaults()
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}

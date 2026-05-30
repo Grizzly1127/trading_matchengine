@@ -59,7 +59,7 @@ func (r *Repository) ApplyMatchEvent(ctx context.Context, in MatchEventApply) er
 			if err != nil {
 				return err
 			}
-			if err := releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
+			if err := r.releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
 				return err
 			}
 		}
@@ -85,14 +85,14 @@ func (r *Repository) ApplyMatchEvent(ctx context.Context, in MatchEventApply) er
 		if err != nil {
 			return err
 		}
-		if err := releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
+		if err := r.releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
 }
 
-func releaseOrderRemainingFreeze(ctx context.Context, tx pgx.Tx, o *Order) error {
+func (r *Repository) releaseOrderRemainingFreeze(ctx context.Context, tx pgx.Tx, o *Order) error {
 	spec, err := RemainingFreeze(o)
 	if err != nil {
 		return fmt.Errorf("release freeze: %w", err)
@@ -100,7 +100,8 @@ func releaseOrderRemainingFreeze(ctx context.Context, tx pgx.Tx, o *Order) error
 	if spec.Amount.IsZero() {
 		return nil
 	}
-	return releaseFunds(ctx, tx, o.UserID, spec.Asset, spec.Amount)
+	amount := r.roundDown(spec.Asset, spec.Amount)
+	return releaseFunds(ctx, tx, o.UserID, spec.Asset, amount)
 }
 
 func insertProcessedMatchEvent(ctx context.Context, tx pgx.Tx, orderID uint64, walSeq uint64, eventType int16) (bool, error) {

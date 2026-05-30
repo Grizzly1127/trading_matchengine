@@ -1,6 +1,7 @@
 package symbol
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
@@ -49,7 +50,11 @@ func (s *Shard) Match(taker engine.Order, commandSeq uint64) ([]engine.Trade, er
 	if taker.Symbol == "" {
 		return nil, engine.ErrSymbolRequired
 	}
-	return s.Symbol(taker.Symbol).Match(taker, commandSeq)
+	se, ok := s.Get(taker.Symbol)
+	if !ok {
+		return nil, fmt.Errorf("unknown symbol %q", taker.Symbol)
+	}
+	return se.Match(taker, commandSeq)
 }
 
 // Cancel 按 symbol 撤单。

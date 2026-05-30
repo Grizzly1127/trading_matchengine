@@ -12,8 +12,10 @@ type Config struct {
 	HTTPListen        string        `json:"http_listen"`
 	OrderService      ServiceConfig `json:"order_service"`
 	MarketDataService ServiceConfig `json:"marketdata_service"`
-	KlineService      ServiceConfig `json:"kline_service"`
-	Auth              AuthConfig    `json:"auth"`
+	KlineService      ServiceConfig               `json:"kline_service"`
+	SymbolsFile       string                      `json:"symbols_file"`
+	Symbols           map[string]SymbolRuleConfig `json:"symbols"`
+	Auth              AuthConfig                  `json:"auth"`
 	Log               LogConfig     `json:"log"`
 }
 
@@ -75,6 +77,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	c.applyServiceDefaults(c.OrderService, "localhost:50051", 10)
 	c.applyServiceDefaults(c.MarketDataService, "localhost:50052", 10)
 	c.applyServiceDefaults(c.KlineService, "localhost:50053", 10)
+	c.applySymbolDefaults()
 
 	if c.Auth.StaticToken == "" {
 		c.Auth.StaticToken = "dev-token-change-me"

@@ -5,11 +5,18 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/symbol"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/shopspring/decimal"
 )
 
 func newTestShard() *symbol.Shard {
-	return symbol.NewShard()
+	sh := symbol.NewShard()
+	reg, err := symbolrules.DefaultRegistry()
+	if err != nil {
+		panic(err)
+	}
+	symbol.RegisterRegistry(sh, reg)
+	return sh
 }
 
 // assertSpreadInvariant 非空盘口时最优买价必须严格低于最优卖价。

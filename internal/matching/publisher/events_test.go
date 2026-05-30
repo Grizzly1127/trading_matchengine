@@ -8,10 +8,22 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/symbol"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 )
 
+func testShard(t *testing.T) *symbol.Shard {
+	t.Helper()
+	sh := symbol.NewShard()
+	reg, err := symbolrules.DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbol.RegisterRegistry(sh, reg)
+	return sh
+}
+
 func TestBuildNewOrderEvents_restingOrderAccepted(t *testing.T) {
-	shard := symbol.NewShard()
+	shard := testShard(t)
 	cmd := recovery.NewOrderFromEngine(engine.Order{
 		OrderID:  1,
 		Symbol:   "BTC-USDT",
@@ -34,7 +46,7 @@ func TestBuildNewOrderEvents_restingOrderAccepted(t *testing.T) {
 }
 
 func TestBuildNewOrderEvents_fullMatchEmitsTradeAndFilled(t *testing.T) {
-	shard := symbol.NewShard()
+	shard := testShard(t)
 	sell := engine.Order{
 		OrderID: 10, Symbol: "BTC-USDT", Side: engine.SideSell, Type: engine.OrderTypeLimit,
 		Price: recovery.MustDecimal("100"), Quantity: recovery.MustDecimal("1"),
@@ -69,7 +81,7 @@ func TestBuildNewOrderEvents_fullMatchEmitsTradeAndFilled(t *testing.T) {
 }
 
 func TestBuildNewOrderEvents_duplicateIsEmpty(t *testing.T) {
-	shard := symbol.NewShard()
+	shard := testShard(t)
 	cmd := recovery.NewOrderFromEngine(engine.Order{
 		OrderID: 99, Symbol: "BTC-USDT", Side: engine.SideBuy, Type: engine.OrderTypeLimit,
 		Price: recovery.MustDecimal("1"), Quantity: recovery.MustDecimal("1"),

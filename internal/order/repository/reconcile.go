@@ -63,7 +63,7 @@ func (r *Repository) RejectStalePending(ctx context.Context, orderID uint64, out
 	if err != nil {
 		return false, err
 	}
-	if err := releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
+	if err := r.releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
 		return false, err
 	}
 	if err := insertCancelOutbox(ctx, tx, current, outboxTopic); err != nil {

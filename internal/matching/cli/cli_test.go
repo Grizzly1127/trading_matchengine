@@ -8,14 +8,20 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/cli"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 )
 
 func testEngine(t *testing.T) *recovery.Engine {
 	t.Helper()
+	reg, err := symbolrules.DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
 	eng, err := recovery.Open(recovery.Config{
-		ShardID:       "shard-0",
-		DataDir:       t.TempDir(),
-		SnapshotEvery: 1000,
+		ShardID:        "shard-0",
+		DataDir:        t.TempDir(),
+		SnapshotEvery:  1000,
+		SymbolRegistry: reg,
 	})
 	if err != nil {
 		t.Fatal(err)

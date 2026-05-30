@@ -8,6 +8,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/shopspring/decimal"
 )
 
@@ -35,10 +36,15 @@ func TestProtoRoundTrip_matchClearsBook(t *testing.T) {
 
 func testConfig(t *testing.T, dir string) recovery.Config {
 	t.Helper()
+	reg, err := symbolrules.DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return recovery.Config{
-		ShardID:       "shard-0",
-		DataDir:       dir,
-		SnapshotEvery: 1000,
+		ShardID:        "shard-0",
+		DataDir:        dir,
+		SnapshotEvery:  1000,
+		SymbolRegistry: reg,
 	}
 }
 

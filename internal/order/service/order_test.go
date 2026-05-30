@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 )
 
 type fakeStore struct {
@@ -108,7 +109,7 @@ func idemKey(userID uint64, clientOrderID string) string {
 
 func TestPlaceOrder_Success(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
-	svc := &Service{Repo: store, OutboxTopic: "order.commands", SlippageBuffer: decimal.Zero}
+	svc := &OrderService{Repo: store, OutboxTopic: "order.commands", SlippageBuffer: decimal.Zero}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -134,7 +135,7 @@ func TestPlaceOrder_Success(t *testing.T) {
 
 func TestPlaceOrder_Idempotent(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
-	svc := &Service{Repo: store, OutboxTopic: "order.commands", SlippageBuffer: decimal.Zero}
+	svc := &OrderService{Repo: store, OutboxTopic: "order.commands", SlippageBuffer: decimal.Zero}
 
 	req := &orderv1.PlaceOrderRequest{
 		UserId:        1,
@@ -159,8 +160,45 @@ func TestPlaceOrder_Idempotent(t *testing.T) {
 	}
 }
 
+func TestPlaceOrder_PrecisionRejected(t *testing.T) {
+	reg, err := symbolrules.DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &OrderService{
+		Repo:           &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)},
+		OutboxTopic:    "order.commands",
+		SlippageBuffer: decimal.Zero,
+		Symbols:        reg,
+	}
+	_, err = svc.PlaceOrder(context.Background(), &orderv1.PlaceOrderRequest{
+		UserId:        1,
+		ClientOrderId: "bad-qty",
+		Symbol:        "BTC-USDT",
+		Side:          commonv1.Side_SIDE_BUY,
+		Type:          commonv1.OrderType_ORDER_TYPE_LIMIT,
+		Price:         &commonv1.Decimal{Value: "100"},
+		Quantity:      &commonv1.Decimal{Value: "0.0000001"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("quantity precision: got %v", err)
+	}
+	_, err = svc.PlaceOrder(context.Background(), &orderv1.PlaceOrderRequest{
+		UserId:        1,
+		ClientOrderId: "bad-price",
+		Symbol:        "BTC-USDT",
+		Side:          commonv1.Side_SIDE_BUY,
+		Type:          commonv1.OrderType_ORDER_TYPE_LIMIT,
+		Price:         &commonv1.Decimal{Value: "100.001"},
+		Quantity:      &commonv1.Decimal{Value: "1"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("price precision: got %v", err)
+	}
+}
+
 func TestPlaceOrder_InvalidArgument(t *testing.T) {
-	svc := &Service{
+	svc := &OrderService{
 		Repo:           &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)},
 		OutboxTopic:    "order.commands",
 		SlippageBuffer: decimal.Zero,
@@ -182,7 +220,7 @@ func TestPlaceOrder_InvalidArgument(t *testing.T) {
 func TestCancelOrder_Success(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
 	store.byID[1] = &repository.Order{ID: 1, UserID: 1, Symbol: "BTC-USDT", Status: "ACCEPTED"}
-	svc := &Service{Repo: store, OutboxTopic: "order.commands"}
+	svc := &OrderService{Repo: store, OutboxTopic: "order.commands"}
 
 	resp, err := svc.CancelOrder(context.Background(), &orderv1.CancelOrderRequest{UserId: 1, OrderId: 1})
 	if err != nil {
@@ -197,7 +235,7 @@ func TestGetOrder_Success(t *testing.T) {
 	store := &fakeStore{byID: map[uint64]*repository.Order{
 		1: {ID: 1, UserID: 1, ClientOrderID: "c1", Symbol: "BTC-USDT", Side: 1, OrderType: 1, Quantity: "1", FilledQuantity: "0", Status: "PENDING"},
 	}}
-	svc := &Service{Repo: store}
+	svc := &OrderService{Repo: store}
 
 	resp, err := svc.GetOrder(context.Background(), &orderv1.GetOrderRequest{UserId: 1, OrderId: 1})
 	if err != nil {
@@ -209,7 +247,7 @@ func TestGetOrder_Success(t *testing.T) {
 }
 
 func TestGetOrder_NotFound(t *testing.T) {
-	svc := &Service{Repo: &fakeStore{byID: make(map[uint64]*repository.Order)}}
+	svc := &OrderService{Repo: &fakeStore{byID: make(map[uint64]*repository.Order)}}
 	_, err := svc.GetOrder(context.Background(), &orderv1.GetOrderRequest{UserId: 1, OrderId: 99})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
@@ -218,7 +256,7 @@ func TestGetOrder_NotFound(t *testing.T) {
 
 func TestPlaceOrder_MarketBuyWithoutPrice_UsesMarketData(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
-	svc := &Service{
+	svc := &OrderService{
 		Repo:           store,
 		OutboxTopic:    "order.commands",
 		MarketData:     &fakeMarketData{price: "100"},
@@ -253,7 +291,7 @@ func TestPlaceOrder_MarketBuyWithoutPrice_UsesMarketData(t *testing.T) {
 
 func TestPlaceOrder_MarketDataUnavailable_ReturnsUnavailable(t *testing.T) {
 	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
-	svc := &Service{
+	svc := &OrderService{
 		Repo:           store,
 		OutboxTopic:    "order.commands",
 		MarketData:     &fakeMarketData{err: errors.New("dial timeout")},

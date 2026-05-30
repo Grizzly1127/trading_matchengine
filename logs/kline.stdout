@@ -1,3 +1,0 @@
-[90m2026-05-29T16:59:25+08:00[0m [32mINF[0m [1mkline open bars restored from redis[0m [36mopen_bars=[0m5 [36mservice=[0mkline
-[90m2026-05-29T16:59:25+08:00[0m [32mINF[0m [1mkafka consumer starting[0m [36mcomponent=[0mtrade_consumer [36mgroup_id=[0mkline-service [36mpartition=[0m0 [36mservice=[0mkline [36mstart_offset=[0m-1 [36mtopic=[0mtrade.events
-[90m2026-05-29T16:59:25+08:00[0m [32mINF[0m [1mkline grpc listening[0m [36mlisten=[0m:50053 [36mservice=[0mkline

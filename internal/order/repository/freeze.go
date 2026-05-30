@@ -5,7 +5,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	ordersymbol "github.com/Grizzly1127/trading_matchengine/internal/order/symbol"
+	ordersymbol "github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 )
 

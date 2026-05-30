@@ -9,6 +9,7 @@ import (
 	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 )
@@ -20,6 +21,8 @@ type Deps struct {
 	Balance    orderv1.BalanceServiceClient
 	MarketData marketdatav1.MarketDataServiceClient
 	Kline      klinev1.KlineServiceClient
+	Symbols    *symbolrules.Registry
+	Assets     *symbolrules.AssetRegistry
 }
 
 // NewRouter 注册路由与中间件链：RequestID → Auth → Recover → AccessLog。
@@ -44,9 +47,10 @@ func NewRouter(deps Deps) http.Handler {
 	r.Get("/v1/balances", balanceH.ListBalances)
 	r.Get("/v1/balances/{asset}", balanceH.GetBalance)
 
-	marketH := &handler.Market{MarketData: deps.MarketData, Log: deps.Log}
+	marketH := &handler.Market{MarketData: deps.MarketData, SymbolRules: deps.Symbols, AssetRules: deps.Assets, Log: deps.Log}
 	r.Get("/v1/market/depth", marketH.Depth)
 	r.Get("/v1/market/ticker", marketH.Ticker)
+	r.Get("/v1/market/symbols", marketH.Symbols)
 
 	if deps.Kline != nil {
 		klineH := &handler.Kline{Client: deps.Kline, Log: deps.Log}

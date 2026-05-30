@@ -14,7 +14,7 @@ import (
 // Server 实现 order.v1.OrderService gRPC。
 type OrderServer struct {
 	orderv1.UnimplementedOrderServiceServer
-	Svc *service.Service
+	Svc *service.OrderService
 }
 
 // PlaceOrder 创建订单。

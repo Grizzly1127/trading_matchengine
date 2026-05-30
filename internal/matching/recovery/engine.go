@@ -12,6 +12,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/symbol"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/snapshot"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/Grizzly1127/trading_matchengine/pkg/wal"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
@@ -21,9 +22,10 @@ const defaultSnapshotEvery = 10000
 
 // Config 持久化撮合引擎配置。
 type Config struct {
-	ShardID       string
-	DataDir       string
-	SnapshotEvery uint64 // 每 N 条命令触发快照；0 表示默认 10000
+	ShardID          string
+	DataDir          string
+	SnapshotEvery    uint64 // 每 N 条命令触发快照；0 表示默认 10000
+	SymbolRegistry   *symbolrules.Registry
 }
 
 // Engine 持久化分片：先写 WAL 再改内存，支持快照与重启恢复。
@@ -77,6 +79,7 @@ func Open(cfg Config) (*Engine, error) {
 		manifest: filepath.Join(snapRoot, "manifest.pb"),
 		seen:     make(map[uint64]struct{}),
 	}
+	symbol.RegisterRegistry(e.shard, cfg.SymbolRegistry)
 	if err := e.recover(); err != nil {
 		_ = e.Close()
 		return nil, err

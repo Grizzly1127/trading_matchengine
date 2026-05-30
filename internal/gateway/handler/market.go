@@ -7,14 +7,17 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/grpcerr"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/response"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	"github.com/rs/zerolog"
 )
 
 type Market struct {
-	MarketData marketdatav1.MarketDataServiceClient
-	Log        zerolog.Logger
+	MarketData   marketdatav1.MarketDataServiceClient
+	SymbolRules  *symbolrules.Registry
+	AssetRules   *symbolrules.AssetRegistry
+	Log          zerolog.Logger
 }
 
 func (h *Market) Depth(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +92,37 @@ func (h *Market) Ticker(w http.ResponseWriter, r *http.Request) {
 		items = append(items, pbTickerToJSON(item))
 	}
 	response.WriteOK(w, r, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+// Symbols 返回可交易对元数据（与 configs/symbols.json 一致）。
+func (h *Market) Symbols(w http.ResponseWriter, r *http.Request) {
+	if h.SymbolRules == nil {
+		grpcerr.Write(w, r, grpcerr.BadRequest("symbols not configured"))
+		return
+	}
+	items := make([]map[string]interface{}, 0)
+	for _, sp := range h.SymbolRules.All() {
+		items = append(items, symbolSpecToJSON(sp, h.AssetRules))
+	}
+	response.WriteOK(w, r, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func symbolSpecToJSON(sp symbolrules.Spec, assets *symbolrules.AssetRegistry) map[string]interface{} {
+	out := map[string]interface{}{
+		"symbol":             sp.Symbol,
+		"base_asset":         sp.BaseAsset,
+		"quote_asset":        sp.QuoteAsset,
+		"price_precision":    sp.PricePrecision,
+		"quantity_precision": sp.QuantityPrecision,
+		"min_quantity":       sp.MinQuantity.String(),
+		"min_notional":       sp.MinNotional.String(),
+		"status":             sp.Status,
+	}
+	if assets != nil {
+		out["base_asset_precision"] = assets.Precision(sp.BaseAsset)
+		out["quote_asset_precision"] = assets.Precision(sp.QuoteAsset)
+	}
+	return out
 }
 
 const timeLayoutMilli = "2006-01-02T15:04:05.000Z07:00"

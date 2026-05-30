@@ -12,6 +12,7 @@
     "grpc_addr": "localhost:50053",
     "dial_seconds": 10
   },
+  "symbols_file": "configs/symbols.json",
   "auth": {
     "static_token": "dev-token-change-me"
   },

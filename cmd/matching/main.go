@@ -58,10 +58,16 @@ func main() {
 
 	log := logRes.Logger
 
+	symbolRegistry, err := cfg.SymbolRegistry()
+	if err != nil {
+		log.Fatal().Err(err).Msg("symbol registry")
+	}
+
 	eng, err := recovery.Open(recovery.Config{
-		ShardID:       cfg.ShardID,
-		DataDir:       cfg.DataDir,
-		SnapshotEvery: cfg.SnapshotEvery,
+		ShardID:        cfg.ShardID,
+		DataDir:        cfg.DataDir,
+		SnapshotEvery:  cfg.SnapshotEvery,
+		SymbolRegistry: symbolRegistry,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("open engine")

@@ -63,6 +63,12 @@ func main() {
 		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).Msg("connect marketdata service")
 	}
 	defer mdClients.Close()
+
+	rulesCfg, err := cfg.LoadRules()
+	if err != nil {
+		log.Fatal().Err(err).Msg("symbol rules")
+	}
+
 	var klineClient klinev1.KlineServiceClient
 	if cfg.KlineService.GRPCAddr != "" {
 		klClients, err := client.ConnectKline(initCtx, cfg.KlineService)
@@ -83,6 +89,8 @@ func main() {
 		Balance:    grpcClients.BalanceClient,
 		MarketData: mdClients.Client,
 		Kline:      klineClient,
+		Symbols:    rulesCfg.Registry,
+		Assets:     rulesCfg.Assets,
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPListen,

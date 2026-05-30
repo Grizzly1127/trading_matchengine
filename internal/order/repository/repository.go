@@ -10,8 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 )
 
 //go:embed migrations/*.sql
@@ -39,12 +41,32 @@ type Order struct {
 
 // Repository 封装 PostgreSQL 订单读写。
 type Repository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	assets *symbolrules.AssetRegistry
 }
 
 // New 创建 Repository。
-func New(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func New(pool *pgxpool.Pool, assets *symbolrules.AssetRegistry) *Repository {
+	if assets == nil {
+		assets, _ = symbolrules.DefaultAssetRegistry()
+	}
+	return &Repository{pool: pool, assets: assets}
+}
+
+func (r *Repository) roundDown(asset string, amount decimal.Decimal) decimal.Decimal {
+	if r == nil || r.assets == nil {
+		reg, _ := symbolrules.DefaultAssetRegistry()
+		return reg.RoundDown(asset, amount)
+	}
+	return r.assets.RoundDown(asset, amount)
+}
+
+func (r *Repository) roundUp(asset string, amount decimal.Decimal) decimal.Decimal {
+	if r == nil || r.assets == nil {
+		reg, _ := symbolrules.DefaultAssetRegistry()
+		return reg.RoundUp(asset, amount)
+	}
+	return r.assets.RoundUp(asset, amount)
 }
 
 // NewPool 创建连接池。
@@ -151,7 +173,7 @@ VALUES ($1, $2, $3)`
 	if err != nil {
 		return nil, fmt.Errorf("compute freeze: %w", err)
 	}
-	if err := lockFunds(ctx, tx, in.UserID, freeze.Asset, freeze.Amount); err != nil {
+	if err := lockFunds(ctx, tx, in.UserID, freeze.Asset, r.roundUp(freeze.Asset, freeze.Amount)); err != nil {
 		return nil, err
 	}
 
