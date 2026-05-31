@@ -60,7 +60,7 @@ flowchart LR
 | `match.events` | ✅ 已用 | 1 | `MatchEvent` (protobuf) | Matching Engine | Order Service、Market Data Service |
 | `trade.events` | ✅ 已用 | 1 | `TradeEvent` (protobuf) | Matching Engine | Order Service、Market Data Service、Kline Service |
 | `kline.raw` | 📋 规划 | — | — | Kline（闭合通知，可选） | 推送/审计等 |
-| `index.price` | 📋 规划 | — | — | Index Price Service | Gateway / 风控等 |
+| `index.price` | ✅ | 1 | `IndexPriceEvent` (protobuf) | Index Price Service | 下游（合约标记价等，待接） |
 | `system.audit` | 📋 规划 | — | — | 各服务 | 审计 |
 
 开发环境创建 Topic：
@@ -387,7 +387,7 @@ sequenceDiagram
 | Topic | 用途 |
 |-------|------|
 | `kline.raw` | K 线 bar 闭合通知（当前 Kline 直接消费 `trade.events` + Redis/DB） |
-| `index.price` | 指数价格广播 |
+| `index.price` | 指数价格广播（Index Price Service 已实现） |
 | `system.audit` | 跨服务审计日志 |
 
 ---

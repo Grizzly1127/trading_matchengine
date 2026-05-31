@@ -12,7 +12,7 @@ if [ -z "$cid" ]; then
   exit 1
 fi
 
-for topic in order.commands match.events trade.events; do
+for topic in order.commands match.events trade.events index.price; do
   docker exec "$cid" "$KAFKA_BIN" \
     --bootstrap-server localhost:9092 \
     --create --if-not-exists \

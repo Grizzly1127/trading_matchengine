@@ -144,7 +144,7 @@ func allowedChannel(ch string) bool {
 }
 
 func snapshotKey(ch string) string {
-	if strings.HasPrefix(ch, "depth:") || strings.HasPrefix(ch, "ticker:") {
+	if strings.HasPrefix(ch, "depth:") || strings.HasPrefix(ch, "ticker:") || strings.HasPrefix(ch, "index:") {
 		return ch
 	}
 	if strings.HasPrefix(ch, "ticker@all:") {

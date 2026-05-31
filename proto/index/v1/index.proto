@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package index.v1;
+
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/index/v1;indexv1";
+
+import "common/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service IndexPriceService {
+    rpc GetIndexPrice(GetIndexPriceRequest) returns (GetIndexPriceResponse);
+}
+
+message GetIndexPriceRequest {
+    string symbol = 1;
+}
+
+message GetIndexPriceResponse {
+    IndexPrice index_price = 1;
+}
+
+message IndexPrice {
+    string symbol = 1;
+    common.v1.Decimal price = 2;
+    google.protobuf.Timestamp updated_at = 3;
+    repeated string sources = 4;
+    bool stale = 5;
+}
+
+// IndexPriceEvent 发布至 Kafka topic index.price。
+message IndexPriceEvent {
+    string symbol = 1;
+    common.v1.Decimal price = 2;
+    int64 ts_ms = 3;
+    repeated string sources = 4;
+}

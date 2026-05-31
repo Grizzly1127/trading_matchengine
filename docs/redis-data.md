@@ -63,7 +63,7 @@ flowchart LR
 | `kline:pending:close` | ✅ | LIST（JSON 元素） | 无 | Kline Service | Kline Worker 消费 |
 | `svc:heartbeat:{service}` | ✅ | 毫秒时间戳字符串 | 10s | Market Data（预留 API） | 监控/探活 |
 | `idempotent:order:{client_order_id}` | 📋 规划 | — | 24h（架构） | — | Order 幂等（当前用 PostgreSQL） |
-| `index:{symbol}` | 📋 规划 | — | 10s（架构） | Index Price | Gateway / 风控 |
+| `index:{symbol}` | ✅ | JSON | 10s | Index Price | Push WS、gRPC |
 
 `{symbol}` 示例：`BTC-USDT`。`{interval}` 示例：`1m`、`1s`、`1h`（见 `pkg/kline/interval`）。  
 `{quote}` 示例：`USDT`、`ALL`。
@@ -77,8 +77,7 @@ flowchart LR
 | `ticker@all:{quote}` | ✅ | 同 `ticker:all:{quote}` Key | Market Data | Push → WS |
 | `kline:{symbol}:{interval}` | ✅ | K 线 bar JSON | Kline Service | Push → WS |
 | `trade:{symbol}` | 📋 预留 | — | （未实现） | Push 已 PSubscribe |
-| `index:{symbol}` | 📋 规划 | — | Index Price | Push 已 PSubscribe |
-| `index` | 📋 规划 | — | Index Price | Push 已 PSubscribe |
+| `index:{symbol}` | ✅ | 同 Key JSON | Index Price | Push → WS |
 
 Push 使用 **模式订阅**（`PSubscribe`）：`depth:*`、`ticker:*`、`trade:*`、`kline:*`、`index:*`、`ticker@all:*`（见 `internal/push/subscriber/redis_subscriber.go`）。
 
