@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package matching.v1;
+
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1;matchingv1";
+
+// MatchingAdminService 内网对账接口（无状态查询内存盘口）。
+service MatchingAdminService {
+  rpc GetOrderPresence(GetOrderPresenceRequest) returns (GetOrderPresenceResponse);
+  rpc ReconcileOrders(ReconcileOrdersRequest) returns (ReconcileOrdersResponse);
+}
+
+// OrderPresence 撮合侧订单存在性（Order Service 超时补偿对账，§4.5 / §5.6）。
+enum OrderPresence {
+  ORDER_PRESENCE_UNSPECIFIED = 0;
+  // 撮合引擎从未应用过该 order_id 的命令（可能 Kafka 未消费或分区不一致）。
+  ORDER_PRESENCE_UNKNOWN = 1;
+  // 订单仍在盘口挂单中。
+  ORDER_PRESENCE_IN_ORDERBOOK = 2;
+  // 已处理过但不在盘口（可能已成交或已撤，等待 match.events 回写）。
+  ORDER_PRESENCE_KNOWN_NOT_IN_ORDERBOOK = 3;
+}
+
+message OrderRef {
+  string symbol = 1;
+  uint64 order_id = 2;
+}
+
+message GetOrderPresenceRequest {
+  string symbol = 1;
+  uint64 order_id = 2;
+}
+
+message GetOrderPresenceResponse {
+  OrderPresence presence = 1;
+}
+
+message ReconcileOrdersRequest {
+  repeated OrderRef orders = 1;
+}
+
+message OrderPresenceResult {
+  uint64 order_id = 1;
+  OrderPresence presence = 2;
+}
+
+message ReconcileOrdersResponse {
+  repeated OrderPresenceResult results = 1;
+}

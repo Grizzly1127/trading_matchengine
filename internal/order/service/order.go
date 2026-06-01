@@ -36,6 +36,7 @@ type OrderStore interface {
 	GetOrderByUser(ctx context.Context, userID, orderID uint64) (*repository.Order, error)
 	BeginCancel(ctx context.Context, userID, orderID uint64, outboxTopic string) (*repository.Order, error)
 	ListOrders(ctx context.Context, filter repository.ListOrdersFilter) ([]repository.Order, error)
+	ListTrades(ctx context.Context, filter repository.ListTradesFilter) ([]repository.Trade, error)
 }
 
 // OrderService 订单业务逻辑。
@@ -177,6 +178,60 @@ func (s *OrderService) ListOrders(ctx context.Context, req *orderv1.ListOrdersRe
 		out = append(out, toOrderInfoPB(&orders[i]))
 	}
 	return &orderv1.ListOrdersResponse{Orders: out}, nil
+}
+
+// ListTrades 查询用户相关成交列表。
+func (s *OrderService) ListTrades(ctx context.Context, req *orderv1.ListTradesRequest) (*orderv1.ListTradesResponse, error) {
+	if s == nil || s.Repo == nil {
+		return nil, fmt.Errorf("order service not configured")
+	}
+	if req == nil {
+		return nil, fmt.Errorf("%w: request is nil", ErrInvalidArgument)
+	}
+	if req.GetUserId() == 0 {
+		return nil, fmt.Errorf("%w: user_id is required", ErrInvalidArgument)
+	}
+
+	filter := repository.ListTradesFilter{
+		UserID:   req.GetUserId(),
+		Symbol:   strings.TrimSpace(req.GetSymbol()),
+		OrderID:  req.GetOrderId(),
+		Page:     int(req.GetPage()),
+		PageSize: int(req.GetPageSize()),
+	}
+	if req.GetCreatedAtFrom() != nil {
+		t := req.GetCreatedAtFrom().AsTime()
+		filter.CreatedAtFrom = &t
+	}
+	if req.GetCreatedAtTo() != nil {
+		t := req.GetCreatedAtTo().AsTime()
+		filter.CreatedAtTo = &t
+	}
+	if filter.CreatedAtFrom != nil && filter.CreatedAtTo != nil && filter.CreatedAtFrom.After(*filter.CreatedAtTo) {
+		return nil, fmt.Errorf("%w: created_at_from must be before created_at_to", ErrInvalidArgument)
+	}
+
+	trades, err := s.Repo.ListTrades(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*orderv1.TradeInfo, 0, len(trades))
+	for i := range trades {
+		out = append(out, toTradeInfoPB(&trades[i]))
+	}
+	return &orderv1.ListTradesResponse{Trades: out}, nil
+}
+
+func toTradeInfoPB(t *repository.Trade) *orderv1.TradeInfo {
+	return &orderv1.TradeInfo{
+		TradeId:      t.TradeID,
+		Symbol:       t.Symbol,
+		Price:        &commonv1.Decimal{Value: t.Price},
+		Quantity:     &commonv1.Decimal{Value: t.Quantity},
+		MakerOrderId: t.MakerOrderID,
+		TakerOrderId: t.TakerOrderID,
+		CreatedAt:    timestamppb.New(t.CreatedAt.UTC()),
+	}
 }
 
 func buildListOrdersFilter(req *orderv1.ListOrdersRequest) (repository.ListOrdersFilter, error) {

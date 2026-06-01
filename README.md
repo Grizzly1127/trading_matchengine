@@ -26,6 +26,7 @@ Client ──WS────▶ Push ◀── Redis Pub/Sub ◀── Market Dat
 | 文档 | 说明 |
 |------|------|
 | [docs/development-roadmap.md](docs/development-roadmap.md) | **开发顺序（建议从这里开始）** |
+| [docs/development-checklist.md](docs/development-checklist.md) | **开发清单**（已完成 `[x]` / 待办 `[ ]`） |
 | [docs/architecture-spec.md](docs/architecture-spec.md) | 架构与 SLA |
 | [docs/rest-api.md](docs/rest-api.md) | 对外 REST / WebSocket |
 | [docs/matching-api.md](docs/matching-api.md) | Matching（Kafka / JSONL / 配置） |

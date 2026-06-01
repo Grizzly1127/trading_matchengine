@@ -17,6 +17,8 @@ type Config struct {
 	DefaultSymbol  string                      `json:"default_symbol"`
 	SymbolsFile    string                      `json:"symbols_file"`
 	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
+	MetricsListen  string                      `json:"metrics_listen"`
+	AdminGRPCListen string                     `json:"admin_grpc_listen"`
 	Kafka          KafkaConfig                 `json:"kafka"`
 	Log            LogConfig   `json:"log"`
 }
@@ -92,6 +94,16 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 	if c.DefaultSymbol == "" {
 		c.DefaultSymbol = "BTC-USDT"
+	}
+	if _, ok := raw["metrics_listen"]; !ok {
+		if c.MetricsListen == "" {
+			c.MetricsListen = ":9101"
+		}
+	}
+	if _, ok := raw["admin_grpc_listen"]; !ok {
+		if c.AdminGRPCListen == "" {
+			c.AdminGRPCListen = ":50061"
+		}
 	}
 	c.applyKafkaDefaults(raw)
 	c.applySymbolDefaults()

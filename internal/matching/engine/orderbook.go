@@ -20,7 +20,7 @@ func NewOrderBook(symbol string) *OrderBook {
 		Symbol:   symbol,
 		asks:     skiplist.NewSkipList(compareAsk),
 		bids:     skiplist.NewSkipList(compareBid),
-		orderMap: make(map[uint64]Order),
+		orderMap: make(map[uint64]Order, 2048),
 	}
 }
 
@@ -106,4 +106,9 @@ func (b *OrderBook) findInBook(orderID uint64) bool {
 		return false
 	}
 	return b.getSiteBook(o.Side).Contains(o)
+}
+
+// HasActiveOrder 订单是否仍在盘口（对账用）。
+func (b *OrderBook) HasActiveOrder(orderID uint64) bool {
+	return b.findInBook(orderID)
 }

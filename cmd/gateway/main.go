@@ -53,11 +53,11 @@ func main() {
 	log := logRes.Logger
 	initCtx := context.Background()
 
-	grpcClients, err := client.ConnectOrder(initCtx, cfg.OrderService)
+	orderClients, err := client.ConnectOrder(initCtx, cfg.OrderService)
 	if err != nil {
 		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderService.GRPCAddr).Msg("connect order service")
 	}
-	defer grpcClients.Close()
+	defer orderClients.Close()
 	mdClients, err := client.ConnectMarketData(initCtx, cfg.MarketDataService)
 	if err != nil {
 		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).Msg("connect marketdata service")
@@ -85,8 +85,8 @@ func main() {
 	router := server.NewRouter(server.Deps{
 		Log:        log,
 		Config:     cfg,
-		Order:      grpcClients.OrderClient,
-		Balance:    grpcClients.BalanceClient,
+		Order:      orderClients.OrderClient,
+		Balance:    orderClients.BalanceClient,
 		MarketData: mdClients.Client,
 		Kline:      klineClient,
 		Symbols:    rulesCfg.Registry,

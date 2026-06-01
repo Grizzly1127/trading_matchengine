@@ -559,6 +559,234 @@ func (x *ListOrdersResponse) GetOrders() []*OrderInfo {
 	return nil
 }
 
+type ListTradesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        uint64                 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol        string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	OrderId       uint64                 `protobuf:"varint,3,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	CreatedAtFrom *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at_from,json=createdAtFrom,proto3" json:"created_at_from,omitempty"`
+	CreatedAtTo   *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at_to,json=createdAtTo,proto3" json:"created_at_to,omitempty"`
+	Page          int32                  `protobuf:"varint,6,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int32                  `protobuf:"varint,7,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTradesRequest) Reset() {
+	*x = ListTradesRequest{}
+	mi := &file_order_v1_order_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTradesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTradesRequest) ProtoMessage() {}
+
+func (x *ListTradesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_order_v1_order_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTradesRequest.ProtoReflect.Descriptor instead.
+func (*ListTradesRequest) Descriptor() ([]byte, []int) {
+	return file_order_v1_order_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListTradesRequest) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ListTradesRequest) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *ListTradesRequest) GetOrderId() uint64 {
+	if x != nil {
+		return x.OrderId
+	}
+	return 0
+}
+
+func (x *ListTradesRequest) GetCreatedAtFrom() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAtFrom
+	}
+	return nil
+}
+
+func (x *ListTradesRequest) GetCreatedAtTo() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAtTo
+	}
+	return nil
+}
+
+func (x *ListTradesRequest) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListTradesRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+type TradeInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TradeId       uint64                 `protobuf:"varint,1,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	Symbol        string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Price         *v1.Decimal            `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity      *v1.Decimal            `protobuf:"bytes,4,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	MakerOrderId  uint64                 `protobuf:"varint,5,opt,name=maker_order_id,json=makerOrderId,proto3" json:"maker_order_id,omitempty"`
+	TakerOrderId  uint64                 `protobuf:"varint,6,opt,name=taker_order_id,json=takerOrderId,proto3" json:"taker_order_id,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TradeInfo) Reset() {
+	*x = TradeInfo{}
+	mi := &file_order_v1_order_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TradeInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TradeInfo) ProtoMessage() {}
+
+func (x *TradeInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_order_v1_order_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TradeInfo.ProtoReflect.Descriptor instead.
+func (*TradeInfo) Descriptor() ([]byte, []int) {
+	return file_order_v1_order_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TradeInfo) GetTradeId() uint64 {
+	if x != nil {
+		return x.TradeId
+	}
+	return 0
+}
+
+func (x *TradeInfo) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *TradeInfo) GetPrice() *v1.Decimal {
+	if x != nil {
+		return x.Price
+	}
+	return nil
+}
+
+func (x *TradeInfo) GetQuantity() *v1.Decimal {
+	if x != nil {
+		return x.Quantity
+	}
+	return nil
+}
+
+func (x *TradeInfo) GetMakerOrderId() uint64 {
+	if x != nil {
+		return x.MakerOrderId
+	}
+	return 0
+}
+
+func (x *TradeInfo) GetTakerOrderId() uint64 {
+	if x != nil {
+		return x.TakerOrderId
+	}
+	return 0
+}
+
+func (x *TradeInfo) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type ListTradesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Trades        []*TradeInfo           `protobuf:"bytes,1,rep,name=trades,proto3" json:"trades,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTradesResponse) Reset() {
+	*x = ListTradesResponse{}
+	mi := &file_order_v1_order_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTradesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTradesResponse) ProtoMessage() {}
+
+func (x *ListTradesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_order_v1_order_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTradesResponse.ProtoReflect.Descriptor instead.
+func (*ListTradesResponse) Descriptor() ([]byte, []int) {
+	return file_order_v1_order_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListTradesResponse) GetTrades() []*TradeInfo {
+	if x != nil {
+		return x.Trades
+	}
+	return nil
+}
+
 type OrderInfo struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	OrderId        uint64                 `protobuf:"varint,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
@@ -578,7 +806,7 @@ type OrderInfo struct {
 
 func (x *OrderInfo) Reset() {
 	*x = OrderInfo{}
-	mi := &file_order_v1_order_proto_msgTypes[8]
+	mi := &file_order_v1_order_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +818,7 @@ func (x *OrderInfo) String() string {
 func (*OrderInfo) ProtoMessage() {}
 
 func (x *OrderInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_order_v1_order_proto_msgTypes[8]
+	mi := &file_order_v1_order_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +831,7 @@ func (x *OrderInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OrderInfo.ProtoReflect.Descriptor instead.
 func (*OrderInfo) Descriptor() ([]byte, []int) {
-	return file_order_v1_order_proto_rawDescGZIP(), []int{8}
+	return file_order_v1_order_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *OrderInfo) GetOrderId() uint64 {
@@ -727,7 +955,26 @@ const file_order_v1_order_proto_rawDesc = "" +
 	"\x04page\x18\b \x01(\x05R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\t \x01(\x05R\bpageSize\"A\n" +
 	"\x12ListOrdersResponse\x12+\n" +
-	"\x06orders\x18\x01 \x03(\v2\x13.order.v1.OrderInfoR\x06orders\"\xda\x03\n" +
+	"\x06orders\x18\x01 \x03(\v2\x13.order.v1.OrderInfoR\x06orders\"\x94\x02\n" +
+	"\x11ListTradesRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x04R\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x19\n" +
+	"\border_id\x18\x03 \x01(\x04R\aorderId\x12B\n" +
+	"\x0fcreated_at_from\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rcreatedAtFrom\x12>\n" +
+	"\rcreated_at_to\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vcreatedAtTo\x12\x12\n" +
+	"\x04page\x18\x06 \x01(\x05R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\a \x01(\x05R\bpageSize\"\x9f\x02\n" +
+	"\tTradeInfo\x12\x19\n" +
+	"\btrade_id\x18\x01 \x01(\x04R\atradeId\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12(\n" +
+	"\x05price\x18\x03 \x01(\v2\x12.common.v1.DecimalR\x05price\x12.\n" +
+	"\bquantity\x18\x04 \x01(\v2\x12.common.v1.DecimalR\bquantity\x12$\n" +
+	"\x0emaker_order_id\x18\x05 \x01(\x04R\fmakerOrderId\x12$\n" +
+	"\x0etaker_order_id\x18\x06 \x01(\x04R\ftakerOrderId\x129\n" +
+	"\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"A\n" +
+	"\x12ListTradesResponse\x12+\n" +
+	"\x06trades\x18\x01 \x03(\v2\x13.order.v1.TradeInfoR\x06trades\"\xda\x03\n" +
 	"\tOrderInfo\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\x04R\aorderId\x12&\n" +
 	"\x0fclient_order_id\x18\x02 \x01(\tR\rclientOrderId\x12\x16\n" +
@@ -742,14 +989,16 @@ const file_order_v1_order_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt2\xaf\x02\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt2\xf8\x02\n" +
 	"\fOrderService\x12G\n" +
 	"\n" +
 	"PlaceOrder\x12\x1b.order.v1.PlaceOrderRequest\x1a\x1c.order.v1.PlaceOrderResponse\x12J\n" +
 	"\vCancelOrder\x12\x1c.order.v1.CancelOrderRequest\x1a\x1d.order.v1.CancelOrderResponse\x12A\n" +
 	"\bGetOrder\x12\x19.order.v1.GetOrderRequest\x1a\x1a.order.v1.GetOrderResponse\x12G\n" +
 	"\n" +
-	"ListOrders\x12\x1b.order.v1.ListOrdersRequest\x1a\x1c.order.v1.ListOrdersResponseBDZBgithub.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1;orderv1b\x06proto3"
+	"ListOrders\x12\x1b.order.v1.ListOrdersRequest\x1a\x1c.order.v1.ListOrdersResponse\x12G\n" +
+	"\n" +
+	"ListTrades\x12\x1b.order.v1.ListTradesRequest\x1a\x1c.order.v1.ListTradesResponseBDZBgithub.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1;orderv1b\x06proto3"
 
 var (
 	file_order_v1_order_proto_rawDescOnce sync.Once
@@ -763,7 +1012,7 @@ func file_order_v1_order_proto_rawDescGZIP() []byte {
 	return file_order_v1_order_proto_rawDescData
 }
 
-var file_order_v1_order_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_order_v1_order_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_order_v1_order_proto_goTypes = []any{
 	(*PlaceOrderRequest)(nil),     // 0: order.v1.PlaceOrderRequest
 	(*PlaceOrderResponse)(nil),    // 1: order.v1.PlaceOrderResponse
@@ -773,44 +1022,55 @@ var file_order_v1_order_proto_goTypes = []any{
 	(*GetOrderResponse)(nil),      // 5: order.v1.GetOrderResponse
 	(*ListOrdersRequest)(nil),     // 6: order.v1.ListOrdersRequest
 	(*ListOrdersResponse)(nil),    // 7: order.v1.ListOrdersResponse
-	(*OrderInfo)(nil),             // 8: order.v1.OrderInfo
-	(v1.Side)(0),                  // 9: common.v1.Side
-	(v1.OrderType)(0),             // 10: common.v1.OrderType
-	(*v1.Decimal)(nil),            // 11: common.v1.Decimal
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(*ListTradesRequest)(nil),     // 8: order.v1.ListTradesRequest
+	(*TradeInfo)(nil),             // 9: order.v1.TradeInfo
+	(*ListTradesResponse)(nil),    // 10: order.v1.ListTradesResponse
+	(*OrderInfo)(nil),             // 11: order.v1.OrderInfo
+	(v1.Side)(0),                  // 12: common.v1.Side
+	(v1.OrderType)(0),             // 13: common.v1.OrderType
+	(*v1.Decimal)(nil),            // 14: common.v1.Decimal
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
 }
 var file_order_v1_order_proto_depIdxs = []int32{
-	9,  // 0: order.v1.PlaceOrderRequest.side:type_name -> common.v1.Side
-	10, // 1: order.v1.PlaceOrderRequest.type:type_name -> common.v1.OrderType
-	11, // 2: order.v1.PlaceOrderRequest.price:type_name -> common.v1.Decimal
-	11, // 3: order.v1.PlaceOrderRequest.quantity:type_name -> common.v1.Decimal
-	12, // 4: order.v1.PlaceOrderResponse.created_at:type_name -> google.protobuf.Timestamp
-	8,  // 5: order.v1.GetOrderResponse.order:type_name -> order.v1.OrderInfo
-	9,  // 6: order.v1.ListOrdersRequest.side:type_name -> common.v1.Side
-	10, // 7: order.v1.ListOrdersRequest.type:type_name -> common.v1.OrderType
-	12, // 8: order.v1.ListOrdersRequest.created_at_from:type_name -> google.protobuf.Timestamp
-	12, // 9: order.v1.ListOrdersRequest.created_at_to:type_name -> google.protobuf.Timestamp
-	8,  // 10: order.v1.ListOrdersResponse.orders:type_name -> order.v1.OrderInfo
-	9,  // 11: order.v1.OrderInfo.side:type_name -> common.v1.Side
-	10, // 12: order.v1.OrderInfo.type:type_name -> common.v1.OrderType
-	11, // 13: order.v1.OrderInfo.price:type_name -> common.v1.Decimal
-	11, // 14: order.v1.OrderInfo.quantity:type_name -> common.v1.Decimal
-	11, // 15: order.v1.OrderInfo.filled_quantity:type_name -> common.v1.Decimal
-	12, // 16: order.v1.OrderInfo.created_at:type_name -> google.protobuf.Timestamp
-	12, // 17: order.v1.OrderInfo.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 18: order.v1.OrderService.PlaceOrder:input_type -> order.v1.PlaceOrderRequest
-	2,  // 19: order.v1.OrderService.CancelOrder:input_type -> order.v1.CancelOrderRequest
-	4,  // 20: order.v1.OrderService.GetOrder:input_type -> order.v1.GetOrderRequest
-	6,  // 21: order.v1.OrderService.ListOrders:input_type -> order.v1.ListOrdersRequest
-	1,  // 22: order.v1.OrderService.PlaceOrder:output_type -> order.v1.PlaceOrderResponse
-	3,  // 23: order.v1.OrderService.CancelOrder:output_type -> order.v1.CancelOrderResponse
-	5,  // 24: order.v1.OrderService.GetOrder:output_type -> order.v1.GetOrderResponse
-	7,  // 25: order.v1.OrderService.ListOrders:output_type -> order.v1.ListOrdersResponse
-	22, // [22:26] is the sub-list for method output_type
-	18, // [18:22] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	12, // 0: order.v1.PlaceOrderRequest.side:type_name -> common.v1.Side
+	13, // 1: order.v1.PlaceOrderRequest.type:type_name -> common.v1.OrderType
+	14, // 2: order.v1.PlaceOrderRequest.price:type_name -> common.v1.Decimal
+	14, // 3: order.v1.PlaceOrderRequest.quantity:type_name -> common.v1.Decimal
+	15, // 4: order.v1.PlaceOrderResponse.created_at:type_name -> google.protobuf.Timestamp
+	11, // 5: order.v1.GetOrderResponse.order:type_name -> order.v1.OrderInfo
+	12, // 6: order.v1.ListOrdersRequest.side:type_name -> common.v1.Side
+	13, // 7: order.v1.ListOrdersRequest.type:type_name -> common.v1.OrderType
+	15, // 8: order.v1.ListOrdersRequest.created_at_from:type_name -> google.protobuf.Timestamp
+	15, // 9: order.v1.ListOrdersRequest.created_at_to:type_name -> google.protobuf.Timestamp
+	11, // 10: order.v1.ListOrdersResponse.orders:type_name -> order.v1.OrderInfo
+	15, // 11: order.v1.ListTradesRequest.created_at_from:type_name -> google.protobuf.Timestamp
+	15, // 12: order.v1.ListTradesRequest.created_at_to:type_name -> google.protobuf.Timestamp
+	14, // 13: order.v1.TradeInfo.price:type_name -> common.v1.Decimal
+	14, // 14: order.v1.TradeInfo.quantity:type_name -> common.v1.Decimal
+	15, // 15: order.v1.TradeInfo.created_at:type_name -> google.protobuf.Timestamp
+	9,  // 16: order.v1.ListTradesResponse.trades:type_name -> order.v1.TradeInfo
+	12, // 17: order.v1.OrderInfo.side:type_name -> common.v1.Side
+	13, // 18: order.v1.OrderInfo.type:type_name -> common.v1.OrderType
+	14, // 19: order.v1.OrderInfo.price:type_name -> common.v1.Decimal
+	14, // 20: order.v1.OrderInfo.quantity:type_name -> common.v1.Decimal
+	14, // 21: order.v1.OrderInfo.filled_quantity:type_name -> common.v1.Decimal
+	15, // 22: order.v1.OrderInfo.created_at:type_name -> google.protobuf.Timestamp
+	15, // 23: order.v1.OrderInfo.updated_at:type_name -> google.protobuf.Timestamp
+	0,  // 24: order.v1.OrderService.PlaceOrder:input_type -> order.v1.PlaceOrderRequest
+	2,  // 25: order.v1.OrderService.CancelOrder:input_type -> order.v1.CancelOrderRequest
+	4,  // 26: order.v1.OrderService.GetOrder:input_type -> order.v1.GetOrderRequest
+	6,  // 27: order.v1.OrderService.ListOrders:input_type -> order.v1.ListOrdersRequest
+	8,  // 28: order.v1.OrderService.ListTrades:input_type -> order.v1.ListTradesRequest
+	1,  // 29: order.v1.OrderService.PlaceOrder:output_type -> order.v1.PlaceOrderResponse
+	3,  // 30: order.v1.OrderService.CancelOrder:output_type -> order.v1.CancelOrderResponse
+	5,  // 31: order.v1.OrderService.GetOrder:output_type -> order.v1.GetOrderResponse
+	7,  // 32: order.v1.OrderService.ListOrders:output_type -> order.v1.ListOrdersResponse
+	10, // 33: order.v1.OrderService.ListTrades:output_type -> order.v1.ListTradesResponse
+	29, // [29:34] is the sub-list for method output_type
+	24, // [24:29] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_order_v1_order_proto_init() }
@@ -824,7 +1084,7 @@ func file_order_v1_order_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_order_v1_order_proto_rawDesc), len(file_order_v1_order_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

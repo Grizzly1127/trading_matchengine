@@ -20,6 +20,9 @@ help:
 test:
 	go test ./...
 
+test-integration:
+	go test -tags=integration -count=1 -timeout 5m ./internal/order/integration/...
+
 test-race:
 	go test -race ./...
 

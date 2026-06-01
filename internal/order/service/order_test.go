@@ -91,6 +91,10 @@ func (f *fakeStore) ListOrders(_ context.Context, filter repository.ListOrdersFi
 	return out, nil
 }
 
+func (f *fakeStore) ListTrades(_ context.Context, _ repository.ListTradesFilter) ([]repository.Trade, error) {
+	return nil, nil
+}
+
 func (f *fakeStore) BeginCancel(_ context.Context, userID, orderID uint64, _ string) (*repository.Order, error) {
 	o, ok := f.byID[orderID]
 	if !ok || o.UserID != userID {

@@ -10,12 +10,14 @@ import (
 // Config 是 order 进程启动配置。
 type Config struct {
 	GRPCListen     string                      `json:"grpc_listen"`
+	MetricsListen  string                      `json:"metrics_listen"`
 	DatabaseURL    string                      `json:"database_url"`
 	MigrateOnStart bool                        `json:"migrate_on_start"`
 	DefaultSymbol  string                      `json:"default_symbol"`
 	SymbolsFile    string                      `json:"symbols_file"`
 	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
 	MarketData     MarketDataConfig            `json:"marketdata"`
+	Matching       MatchingConfig              `json:"matching"`
 	Kafka          KafkaConfig                 `json:"kafka"`
 	Reconciler     ReconcilerConfig            `json:"reconciler"`
 	Log            LogConfig                   `json:"log"`
@@ -26,6 +28,13 @@ type MarketDataConfig struct {
 	DialTimeoutSeconds    int     `json:"dial_timeout_seconds"`
 	RequestTimeoutSeconds int     `json:"request_timeout_seconds"`
 	SlippageBuffer        float64 `json:"slippage_buffer"`
+}
+
+// MatchingConfig 撮合对账 gRPC（§4.5）。
+type MatchingConfig struct {
+	Enabled            bool   `json:"enabled"`
+	GRPCAddr           string `json:"grpc_addr"`
+	DialTimeoutSeconds int    `json:"dial_timeout_seconds"`
 }
 
 // ReconcilerConfig 超时补偿 scheduler（§4.5）。
@@ -97,6 +106,20 @@ func Load(path string) (Config, error) {
 func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.GRPCListen == "" {
 		c.GRPCListen = ":50051"
+	}
+	if _, ok := raw["metrics_listen"]; !ok {
+		if c.MetricsListen == "" {
+			c.MetricsListen = ":9104"
+		}
+	}
+	if c.Matching.GRPCAddr == "" {
+		c.Matching.GRPCAddr = "localhost:50061"
+	}
+	if c.Matching.DialTimeoutSeconds <= 0 {
+		c.Matching.DialTimeoutSeconds = 3
+	}
+	if _, ok := raw["matching"]; !ok {
+		c.Matching.Enabled = true
 	}
 	if c.DefaultSymbol == "" {
 		c.DefaultSymbol = "BTC-USDT"

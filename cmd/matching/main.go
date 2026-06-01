@@ -5,18 +5,26 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/admin"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/cli"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/consumer"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
+	"google.golang.org/grpc"
+	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 )
 
 func main() {
@@ -63,11 +71,15 @@ func main() {
 		log.Fatal().Err(err).Msg("symbol registry")
 	}
 
+	m := metrics.New()
+	m.SetWalLastSeq(0)
+
 	eng, err := recovery.Open(recovery.Config{
 		ShardID:        cfg.ShardID,
 		DataDir:        cfg.DataDir,
 		SnapshotEvery:  cfg.SnapshotEvery,
 		SymbolRegistry: symbolRegistry,
+		Metrics:        m,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("open engine")
@@ -85,9 +97,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	if cfg.MetricsListen != "" {
+		go startMetricsHTTP(ctx, log, cfg.MetricsListen)
+		go startMetricsLogger(ctx, log, m)
+	}
+	if cfg.AdminGRPCListen != "" {
+		go startAdminGRPC(ctx, log, cfg.AdminGRPCListen, eng)
+	}
+	m.SetWalLastSeq(eng.LastSeq())
+
 	var runErr error
 	if cfg.Kafka.Enabled {
-		runErr = runKafka(ctx, cfg, eng, log)
+		runErr = runKafka(ctx, cfg, eng, log, m)
 	} else {
 		runErr = runCLI(ctx, cfg, eng)
 	}
@@ -126,7 +147,7 @@ func runCLI(ctx context.Context, cfg config.Config, eng *recovery.Engine) error 
 	})
 }
 
-func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log zerolog.Logger) error {
+func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log zerolog.Logger, m *metrics.Metrics) error {
 	partition := cfg.Kafka.Partition
 	resume, hasResume := eng.MaxKafkaOffset(uint32(partition))
 	start := consumer.StartOffset(resume, hasResume)
@@ -165,8 +186,91 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 		Engine:    eng,
 		Publisher: pub,
 		Partition: uint32(partition),
+		Metrics:   m,
 	}
+	go pollKafkaLag(ctx, reader, m, log)
 	return consumer.Run(ctx, reader, h)
+}
+
+func pollKafkaLag(ctx context.Context, reader *kafka.CommandReader, m *metrics.Metrics, log zerolog.Logger) {
+	if m == nil || reader == nil {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			lag, err := reader.ReadLag(ctx)
+			if err != nil {
+				log.Debug().Err(err).Msg("kafka read lag")
+				continue
+			}
+			m.SetKafkaLag(lag)
+		}
+	}
+}
+
+func startAdminGRPC(ctx context.Context, log zerolog.Logger, addr string, eng *recovery.Engine) {
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Error().Err(err).Str("listen", addr).Msg("matching admin grpc listen failed")
+		return
+	}
+	srv := grpc.NewServer()
+	matchingv1.RegisterMatchingAdminServiceServer(srv, &admin.Server{Engine: eng})
+	go func() {
+		<-ctx.Done()
+		srv.GracefulStop()
+	}()
+	log.Info().Str("listen", addr).Msg("matching admin grpc listening")
+	if err := srv.Serve(lis); err != nil {
+		log.Error().Err(err).Msg("matching admin grpc serve")
+	}
+}
+
+func startMetricsHTTP(ctx context.Context, log zerolog.Logger, addr string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	log.Info().Str("listen", addr).Msg("matching metrics listening")
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Error().Err(err).Msg("matching metrics serve")
+	}
+}
+
+func startMetricsLogger(ctx context.Context, log zerolog.Logger, m *metrics.Metrics) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s := m.Snap()
+				log.Info().
+					Uint64("commands_processed", s.CommandsProcessed).
+					Uint64("commands_failed", s.CommandsFailed).
+					Int64("kafka_lag", s.KafkaLag).
+					Uint64("last_processed_offset", s.LastProcessedOffset).
+					Uint64("wal_last_seq", s.WalLastSeq).
+					Msg("matching metrics")
+			}
+		}
+	}()
 }
 
 func isTerminal(f *os.File) bool {

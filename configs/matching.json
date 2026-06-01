@@ -3,8 +3,19 @@
   "shard_id": "shard-0",
   "snapshot_every": 10000,
   "snapshot_on_exit": true,
-  "commands_file": "",
   "default_symbol": "BTC-USDT",
+  "symbols_file": "configs/symbols.json",
+  "metrics_listen": ":9101",
+  "admin_grpc_listen": ":50061",
+  "kafka": {
+    "enabled": true,
+    "brokers": ["localhost:9092"],
+    "group_id": "matching-shard-0",
+    "command_topic": "order.commands",
+    "match_topic": "match.events",
+    "trade_topic": "trade.events",
+    "partition": 0
+  },
   "log": {
     "level": "info",
     "dev": true,

@@ -45,6 +45,13 @@ func (s *OrderServer) ListOrders(ctx context.Context, req *orderv1.ListOrdersReq
 	})
 }
 
+// ListTrades 查询成交列表。
+func (s *OrderServer) ListTrades(ctx context.Context, req *orderv1.ListTradesRequest) (*orderv1.ListTradesResponse, error) {
+	return invokeOrder(s, req, func() (*orderv1.ListTradesResponse, error) {
+		return s.Svc.ListTrades(ctx, req)
+	})
+}
+
 func invokeOrder[T any](s *OrderServer, req any, fn func() (T, error)) (T, error) {
 	var zero T
 	if s == nil || s.Svc == nil {

@@ -3,7 +3,9 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
@@ -16,10 +18,25 @@ type Handler struct {
 	Engine    *recovery.Engine
 	Publisher publisher.Publisher
 	Partition uint32
+	Metrics   *metrics.Metrics
 }
 
 // Process 解码、撮合、发布；调用方在成功后 Commit offset。
 func (h *Handler) Process(ctx context.Context, msg kafka.Message) error {
+	start := time.Now()
+	err := h.process(ctx, msg)
+	if h.Metrics != nil {
+		if err != nil {
+			h.Metrics.ObserveCommandFailed()
+		} else {
+			h.Metrics.ObserveProcessing(time.Since(start))
+			h.Metrics.SetLastProcessedOffset(uint64(msg.Offset))
+		}
+	}
+	return err
+}
+
+func (h *Handler) process(ctx context.Context, msg kafka.Message) error {
 	var env matchingv1.OrderCommandEnvelope
 	if err := proto.Unmarshal(msg.Value, &env); err != nil {
 		return fmt.Errorf("consumer: decode envelope: %w", err)
@@ -46,8 +63,17 @@ func (h *Handler) processNewOrder(ctx context.Context, cmd *matchingv1.NewOrderC
 	walSeq := h.Engine.LastSeq()
 	duplicate := walSeq == before
 
+	if h.Metrics != nil {
+		h.Metrics.ObserveTrades(len(trades))
+	}
 	out := publisher.BuildNewOrderEvents(h.Engine.Shard(), cmd, trades, walSeq, duplicate)
-	return h.Publisher.Publish(ctx, out)
+	if err := h.Publisher.Publish(ctx, out); err != nil {
+		if h.Metrics != nil {
+			h.Metrics.ObservePublishError()
+		}
+		return err
+	}
+	return nil
 }
 
 func (h *Handler) processCancel(ctx context.Context, cmd *matchingv1.CancelOrderCommand, msg kafka.Message) error {
@@ -58,5 +84,11 @@ func (h *Handler) processCancel(ctx context.Context, cmd *matchingv1.CancelOrder
 		return err
 	}
 	out := publisher.BuildCancelEvents(cmd, h.Engine.LastSeq())
-	return h.Publisher.Publish(ctx, out)
+	if err := h.Publisher.Publish(ctx, out); err != nil {
+		if h.Metrics != nil {
+			h.Metrics.ObservePublishError()
+		}
+		return err
+	}
+	return nil
 }

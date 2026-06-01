@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/presence"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/symbol"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/snapshot"
@@ -26,6 +28,7 @@ type Config struct {
 	DataDir          string
 	SnapshotEvery    uint64 // 每 N 条命令触发快照；0 表示默认 10000
 	SymbolRegistry   *symbolrules.Registry
+	Metrics          *metrics.Metrics
 }
 
 // Engine 持久化分片：先写 WAL 再改内存，支持快照与重启恢复。
@@ -161,6 +164,26 @@ func (e *Engine) Close() error {
 	return e.wal.Close()
 }
 
+// LookupOrderPresence 查询订单在撮合内存中的存在性（§5.6 对账）。
+func (e *Engine) LookupOrderPresence(symbol string, orderID uint64) presence.Kind {
+	if e == nil || orderID == 0 || symbol == "" {
+		return presence.Unknown
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.seen[orderID]; !ok {
+		return presence.Unknown
+	}
+	se, ok := e.shard.Get(symbol)
+	if !ok || se == nil || se.OrderBook == nil {
+		return presence.KnownNotInOrderbook
+	}
+	if se.OrderBook.HasActiveOrder(orderID) {
+		return presence.InOrderbook
+	}
+	return presence.KnownNotInOrderbook
+}
+
 // ApplyNewOrder 先写 WAL 再撮合；重复 order_id 幂等跳过。
 func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade, error) {
 	if cmd == nil || cmd.GetOrder() == nil {
@@ -184,8 +207,12 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 	}
 
 	seq := e.wal.LastSeq() + 1
+	walStart := time.Now()
 	if err := e.wal.Append(seq, wal.EventTypeNewOrder, payload); err != nil {
 		return nil, err
+	}
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.ObserveWalAppend(time.Since(walStart))
 	}
 
 	trades, err := e.applyNewOrder(cmd, seq)
@@ -193,6 +220,9 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 		return trades, err
 	}
 	e.recovered = seq
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.SetWalLastSeq(seq)
+	}
 	if err := e.maybeSnapshot(seq); err != nil {
 		return trades, err
 	}
@@ -217,14 +247,21 @@ func (e *Engine) ApplyCancel(cmd *matchingv1.CancelOrderCommand) error {
 	}
 
 	seq := e.wal.LastSeq() + 1
+	walStart := time.Now()
 	if err := e.wal.Append(seq, wal.EventTypeCancelOrder, payload); err != nil {
 		return err
+	}
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.ObserveWalAppend(time.Since(walStart))
 	}
 
 	if err := e.shard.Cancel(cmd.GetSymbol(), cmd.GetOrderId()); err != nil {
 		return err
 	}
 	e.recovered = seq
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.SetWalLastSeq(seq)
+	}
 	return e.maybeSnapshot(seq)
 }
 

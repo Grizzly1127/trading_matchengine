@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,6 +20,8 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/order/consumer"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/handler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/marketdata"
+	matchengine "github.com/Grizzly1127/trading_matchengine/internal/order/matching"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/reconciler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
@@ -26,6 +29,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -83,6 +87,17 @@ func main() {
 
 	repo := repository.New(pool, rulesCfg.Assets)
 
+	var matchingClient *matchengine.Client
+	if cfg.Matching.Enabled && cfg.Matching.GRPCAddr != "" {
+		mc, err := matchengine.Connect(context.Background(), cfg.Matching.GRPCAddr, time.Duration(cfg.Matching.DialTimeoutSeconds)*time.Second)
+		if err != nil {
+			log.Warn().Err(err).Str("grpc_addr", cfg.Matching.GRPCAddr).Msg("matching admin connect failed, reconciler without matching")
+		} else {
+			matchingClient = mc
+			defer matchingClient.Close()
+		}
+	}
+
 	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
 	defer writer.Close()
 	mdClient, err := marketdata.Connect(ctx, cfg.MarketData.GRPCAddr, time.Duration(cfg.MarketData.DialTimeoutSeconds)*time.Second)
@@ -94,14 +109,14 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 
-	svc := &service.OrderService{
+	orderSvc := &service.OrderService{
 		Repo:           repo,
 		OutboxTopic:    cfg.Kafka.CommandTopic,
 		MarketData:     mdClient,
 		SlippageBuffer: decimal.NewFromFloat(cfg.MarketData.SlippageBuffer),
 		Symbols:        rulesCfg.Registry,
 	}
-	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: svc})
+	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: orderSvc})
 	balanceSvc := &service.BalanceService{Repo: repo}
 	orderv1.RegisterBalanceServiceServer(grpcServer, &handler.BalanceServer{Svc: balanceSvc})
 
@@ -113,6 +128,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	m := metrics.New()
+	if cfg.MetricsListen != "" {
+		go startOrderMetricsHTTP(ctx, log, cfg.MetricsListen)
+		go startOrderMetricsCollector(ctx, log, repo, m)
+	}
+
 	relay := &outbox.Relay{
 		Store:  repo,
 		Writer: writer,
@@ -122,9 +143,10 @@ func main() {
 	go relay.Run(ctx)
 
 	reconcileSched := &reconciler.Scheduler{
-		Store:  repo,
-		Log:    log.With().Str("component", "reconciler").Logger(),
-		Config: cfg.ReconcilerRuntime(cfg.Kafka.CommandTopic),
+		Store:    repo,
+		Matching: matchingClient,
+		Log:      log.With().Str("component", "reconciler").Logger(),
+		Config:   cfg.ReconcilerRuntime(cfg.Kafka.CommandTopic),
 	}
 	go reconcileSched.Run(ctx)
 
@@ -177,4 +199,52 @@ func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Con
 			tradeLog.Error().Err(err).Msg("trade consumer stopped")
 		}
 	}()
+}
+
+func startOrderMetricsHTTP(ctx context.Context, log zerolog.Logger, addr string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	log.Info().Str("listen", addr).Msg("order metrics listening")
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Error().Err(err).Msg("order metrics serve")
+	}
+}
+
+func startOrderMetricsCollector(ctx context.Context, log zerolog.Logger, repo *repository.Repository, m *metrics.Metrics) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	refresh := func() {
+		n, err := repo.CountUnpublishedOutbox(ctx)
+		if err != nil {
+			log.Debug().Err(err).Msg("order metrics: outbox count")
+		} else {
+			m.SetOutboxPendingCount(n)
+		}
+		sec, err := repo.MaxStuckPendingSeconds(ctx)
+		if err != nil {
+			log.Debug().Err(err).Msg("order metrics: stuck pending")
+		} else {
+			m.SetOrderStuckPendingSeconds(sec)
+		}
+	}
+	refresh()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
 }

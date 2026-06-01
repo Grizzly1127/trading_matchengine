@@ -3,7 +3,7 @@
 **版本**: 1.1  
 **日期**: 2026-05-24  
 **状态**: 草稿  
-**关联**: [architecture-spec.md](./architecture-spec.md) · [rest-api.md](./rest-api.md)
+**关联**: [architecture-spec.md](./architecture-spec.md) · [rest-api.md](./rest-api.md) · [development-checklist.md](./development-checklist.md)（实现进度勾选清单）
 
 本文档记录**自学 Go 前提下**实现本交易所服务集群的推荐顺序、每步验收标准与可推迟模块。与架构文档 [§8 分阶段落地路线](./architecture-spec.md#8-分阶段落地路线) 对齐，但对「先写什么代码」做了更适合初学者的微调。
 

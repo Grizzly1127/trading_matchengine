@@ -13,6 +13,7 @@ service OrderService {
   rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
   rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
   rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
+  rpc ListTrades(ListTradesRequest) returns (ListTradesResponse);
 }
 
 message PlaceOrderRequest {
@@ -68,6 +69,30 @@ message ListOrdersRequest {
 
 message ListOrdersResponse {
   repeated OrderInfo orders = 1;
+}
+
+message ListTradesRequest {
+  uint64 user_id = 1;
+  string symbol = 2;
+  uint64 order_id = 3;
+  google.protobuf.Timestamp created_at_from = 4;
+  google.protobuf.Timestamp created_at_to = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message TradeInfo {
+  uint64 trade_id = 1;
+  string symbol = 2;
+  common.v1.Decimal price = 3;
+  common.v1.Decimal quantity = 4;
+  uint64 maker_order_id = 5;
+  uint64 taker_order_id = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListTradesResponse {
+  repeated TradeInfo trades = 1;
 }
 
 message OrderInfo {

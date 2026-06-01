@@ -99,6 +99,11 @@ func (c *CommandReader) Commit(ctx context.Context, msg Message) error {
 	})
 }
 
+// ReadLag 返回当前分区消费 lag（kafka-go：high watermark - 当前读位置）。
+func (c *CommandReader) ReadLag(ctx context.Context) (int64, error) {
+	return c.reader.ReadLag(ctx)
+}
+
 // Close 关闭 reader。
 func (c *CommandReader) Close() error {
 	return c.reader.Close()

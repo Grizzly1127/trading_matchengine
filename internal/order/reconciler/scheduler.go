@@ -4,12 +4,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/rs/zerolog"
 )
 
 // Store 超时补偿所需持久化操作。
 type Store interface {
-	FindStalePendingForReject(ctx context.Context, olderThan time.Time, limit int) ([]uint64, error)
+	FindStalePendingForReject(ctx context.Context, olderThan time.Time, limit int) ([]repository.StalePendingOrder, error)
 	RejectStalePending(ctx context.Context, orderID uint64, outboxTopic string) (bool, error)
 	FindStuckCancelingForResend(ctx context.Context, olderThan time.Time, limit int) ([]uint64, error)
 	ResendCancelCommand(ctx context.Context, orderID uint64, outboxTopic string) (bool, error)
@@ -29,9 +30,10 @@ type Config struct {
 
 // Scheduler 周期性扫描中间态订单并补偿。
 type Scheduler struct {
-	Store  Store
-	Log    zerolog.Logger
-	Config Config
+	Store    Store
+	Matching MatchingAdmin
+	Log      zerolog.Logger
+	Config   Config
 }
 
 // Run 阻塞运行直至 ctx 取消。
@@ -75,19 +77,32 @@ func (s *Scheduler) warnStaleOutbox(ctx context.Context, cfg Config, now time.Ti
 
 func (s *Scheduler) rejectStalePending(ctx context.Context, cfg Config, now time.Time) {
 	cutoff := now.Add(-cfg.PendingAcceptTimeout)
-	ids, err := s.Store.FindStalePendingForReject(ctx, cutoff, cfg.BatchSize)
+	orders, err := s.Store.FindStalePendingForReject(ctx, cutoff, cfg.BatchSize)
 	if err != nil {
 		s.Log.Error().Err(err).Msg("reconciler: find stale pending")
 		return
 	}
-	for _, id := range ids {
-		applied, err := s.Store.RejectStalePending(ctx, id, cfg.CommandTopic)
+	for _, o := range orders {
+		if s.Matching != nil {
+			presence, err := s.Matching.GetOrderPresence(ctx, o.Symbol, o.ID)
+			if err != nil {
+				s.Log.Warn().Err(err).Uint64("order_id", o.ID).Str("symbol", o.Symbol).
+					Msg("reconciler: matching presence failed, skip reject")
+				continue
+			}
+			if !shouldRejectAfterMatching(presence) {
+				s.Log.Info().Uint64("order_id", o.ID).Str("presence", presence.String()).
+					Msg("reconciler: matching says order active/processed, skip reject")
+				continue
+			}
+		}
+		applied, err := s.Store.RejectStalePending(ctx, o.ID, cfg.CommandTopic)
 		if err != nil {
-			s.Log.Warn().Err(err).Uint64("order_id", id).Msg("reconciler: reject pending failed")
+			s.Log.Warn().Err(err).Uint64("order_id", o.ID).Msg("reconciler: reject pending failed")
 			continue
 		}
 		if applied {
-			s.Log.Warn().Uint64("order_id", id).Msg("reconciler: pending timeout rejected, unfrozen, cancel enqueued")
+			s.Log.Warn().Uint64("order_id", o.ID).Msg("reconciler: pending timeout rejected, unfrozen, cancel enqueued")
 		}
 	}
 }

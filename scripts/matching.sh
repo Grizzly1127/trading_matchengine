@@ -8,7 +8,7 @@
 #   ./scripts/matching.sh status
 #
 # 环境变量:
-#   MATCHING_CONFIG  配置文件（默认 configs/matching.kafka.json）
+#   MATCHING_CONFIG  配置文件（默认 configs/matching.json）
 #   MATCHING_BIN     可执行文件路径（默认 bin/matching）
 set -euo pipefail
 
@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${MATCHING_BIN:-$ROOT/bin/matching}"
 PID_FILE="${MATCHING_PID_FILE:-$ROOT/run/matching.pid}"
 STDOUT_LOG="${MATCHING_STDOUT_LOG:-$ROOT/logs/matching.stdout}"
-CONFIG="${MATCHING_CONFIG:-$ROOT/configs/matching.kafka.json}"
+CONFIG="${MATCHING_CONFIG:-$ROOT/configs/matching.json}"
 STOP_TIMEOUT="${MATCHING_STOP_TIMEOUT:-30}"
 
 usage() {
