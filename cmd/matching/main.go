@@ -17,10 +17,12 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/consumer"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/orderclient"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -85,6 +87,13 @@ func main() {
 		log.Fatal().Err(err).Msg("open engine")
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := runRecoveryVerify(ctx, log, cfg, eng, symbolRegistry); err != nil {
+		log.Fatal().Err(err).Msg("recovery verify failed")
+	}
+
 	log.Info().
 		Str("config", *configPath).
 		Str("shard_id", cfg.ShardID).
@@ -93,9 +102,6 @@ func main() {
 		Uint64("recovered_offset", eng.RecoveredOffset()).
 		Uint64("last_seq", eng.LastSeq()).
 		Msg("matching engine ready")
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	if cfg.MetricsListen != "" {
 		go startMetricsHTTP(ctx, log, cfg.MetricsListen)
@@ -126,6 +132,69 @@ func main() {
 	if runErr != nil {
 		log.Fatal().Err(runErr).Msg("exit")
 	}
+}
+
+func runRecoveryVerify(ctx context.Context, log zerolog.Logger, cfg config.Config, eng *recovery.Engine, reg *symbolrules.Registry) error {
+	if !cfg.OrderService.Enabled || cfg.OrderService.GRPCAddr == "" {
+		log.Warn().Msg("order_service disabled, skip startup recovery verify (§5.6)")
+		return nil
+	}
+	symbols := eng.Shard().Symbols()
+	if reg != nil {
+		for _, sp := range reg.All() {
+			symbols = append(symbols, sp.Symbol)
+		}
+	}
+	symbols = uniqueSymbols(symbols)
+	if len(symbols) == 0 {
+		return nil
+	}
+
+	dial := time.Duration(cfg.OrderService.DialTimeoutSeconds) * time.Second
+	client, err := orderclient.Connect(ctx, cfg.OrderService.GRPCAddr, dial)
+	if err != nil {
+		return fmt.Errorf("connect order admin: %w", err)
+	}
+	defer client.Close()
+
+	diffs, err := recovery.VerifyAll(ctx, eng, client, symbols, recovery.VerifyConfig{
+		Timeout: cfg.RecoveryVerifyTimeout(),
+	})
+	if err != nil {
+		return err
+	}
+	if len(diffs) == 0 {
+		log.Info().Int("symbols", len(symbols)).Msg("recovery verify ok")
+		return nil
+	}
+
+	const reason = "orderbook_db_mismatch"
+	recovery.ApplyReadOnly(eng, diffs, reason)
+	for _, d := range diffs {
+		log.Error().
+			Str("symbol", d.Symbol).
+			Uints64("only_in_db", d.OnlyInDB).
+			Uints64("only_in_book", d.OnlyInBook).
+			Str("reason", reason).
+			Msg("recovery verify mismatch: symbol read-only")
+	}
+	return nil
+}
+
+func uniqueSymbols(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func runCLI(ctx context.Context, cfg config.Config, eng *recovery.Engine) error {

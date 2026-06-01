@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/push/limits"
 	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 )
 
@@ -15,6 +16,7 @@ type Config struct {
 	Auth       auth.Config    `json:"auth"`
 	TLS        auth.TLSConfig `json:"tls"`
 	Redis      RedisConfig    `json:"redis"`
+	Limits     limits.Config  `json:"limits"`
 	Log        LogConfig      `json:"log"`
 }
 
@@ -62,6 +64,7 @@ func Load(path string) (Config, error) {
 	if cfg.Redis.Addr == "" {
 		cfg.Redis.Addr = "localhost:6379"
 	}
+	cfg.Limits = cfg.Limits.WithDefaults()
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
 	}

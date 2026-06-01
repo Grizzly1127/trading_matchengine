@@ -84,7 +84,7 @@
 - [x] 重启撮合引擎后挂单不丢失（WAL + Snapshot）
 - [x] 已成交订单不重复撮合
 - [x] gRPC 下单 → 撮合 → DB 状态与 `trades` 回写（联调路径）
-- [ ] 架构 §5.6：**启动后与 Order Service 对账**（PENDING/PARTIAL vs Orderbook diff、只读拒单）
+- [x] 架构 §5.6：**启动后与 Order Service 对账**（PENDING/PARTIAL vs Orderbook diff、只读拒单）
 
 ---
 
@@ -98,10 +98,9 @@
 - [x] Redis：`depth:{symbol}`、`ticker:{symbol}`、`ticker:all:{quote}`
 - [x] Pub/Sub 发布 depth / ticker / `ticker@all:{quote}`
 - [x] 定时深度推送（默认 100ms）
-- [x] 全市场 Ticker 定时发布（`ticker_all_interval_ms`，默认 500ms）
+- [x] 全市场 Ticker 定时发布（`ticker_all_interval_ms`，默认 100ms；`ticker_all_heartbeat_sec`）
 - [x] Prometheus `/metrics`（Market Data）
-- [ ] Ticker 24h 开高低、涨跌幅完整计算（部分字段占位 `"0"`）
-- [ ] Redis 行情 payload 改为 protobuf（代码内 TODO）
+- [x] Ticker 24h 开高低、涨跌幅完整计算（滚动 24h 窗口，内存成交序列）
 
 ### 2.2 Push + WebSocket（6.2）
 
@@ -109,11 +108,10 @@
 - [x] 订阅：`depth:`、`ticker:`、`kline:`、`index:`、`ticker@all`
 - [x] 订阅后 Redis GET 快照再收增量
 - [x] `internal/push/server/ws_integration_test.go`
-- [ ] **Gateway 同进程暴露 WS**（架构写 Gateway；当前 Push 独立 :8081，可用 Nginx 统一入口）
-- [ ] WS 频道 `trade:{symbol}`（Push 已监听，**无发布方**）
-- [ ] WS 频道 `order`（用户订单状态，需 Order → Redis）
-- [ ] `ticker@all` 协议对齐 rest-api §8.2：`type=snapshot|delta|heartbeat`、100ms delta、做市商鉴权
-- [ ] 普通用户 / 做市商连接数与 symbol 数限流
+- [x] WS 频道 `trade:{symbol}`（Market Data 消费 `trade.events` → Redis `PUBLISH trade:{symbol}`）
+- [x] WS 频道 `order`（Order 消费 `match.events` 落库后 → Redis `PUBLISH order:{user_id}`）
+- [x] `ticker@all` 协议对齐 rest-api §8.2：`type=snapshot|delta|heartbeat`、100ms delta、做市商鉴权
+- [x] 普通用户 / 做市商连接数与 symbol 数限流
 
 ### 2.3 Kline Service（6.3）
 
@@ -149,8 +147,8 @@
 - [x] 客户端 WS 可收到 **单 symbol Ticker**
 - [x] 客户端 WS 可收到 **K 线**
 - [x] 客户端 WS 可收到 **指数价格**（需启动 indexprice）
-- [ ] 客户端 WS 可收到 **公开市场成交**（`trade:{symbol}`）
-- [ ] 客户端 WS 可收到 **用户订单**（`order`）
+- [x] 客户端 WS 可收到 **公开市场成交**（`trade:{symbol}`）
+- [x] 客户端 WS 可收到 **用户订单**（`order`）
 - [ ] `ticker@all` 完整做市商体验（REST 快照 + WS delta）
 
 ### 2.7 推迟但相关的 Phase 2 项
@@ -241,7 +239,7 @@
 | `index.price` | [x] | Index Price 可选发布 |
 | `kline.raw` | [ ] | 规划；Kline 直消费 trade |
 | `system.audit` | [ ] | 规划 |
-| Redis `trade:{symbol}` | [ ] | 预留，Push 已订阅 |
+| Redis `trade:{symbol}` | [x] | Market Data 发布 |
 | Redis `idempotent:order:*` | [ ] | 规划；DB 幂等已够用 |
 
 ---

@@ -13,12 +13,19 @@ import (
 
 // MatchStore 应用 match.events 的持久化接口。
 type MatchStore interface {
-	ApplyMatchEvent(ctx context.Context, in repository.MatchEventApply) error
+	ApplyMatchEvent(ctx context.Context, in repository.MatchEventApply) (applied bool, err error)
+	GetOrderByID(ctx context.Context, orderID uint64) (*repository.Order, error)
+}
+
+// OrderPublisher 订单状态 WS 推送（match.events 落库后）。
+type OrderPublisher interface {
+	PublishOrderUpdate(ctx context.Context, o *repository.Order, eventType int16, walSeq uint64) error
 }
 
 // MatchHandler 消费 match.events 并更新 orders.status。
 type MatchHandler struct {
-	Repo MatchStore
+	Repo      MatchStore
+	Publisher OrderPublisher
 }
 
 // Process 解码并应用 MatchEvent。
@@ -46,11 +53,26 @@ func (h *MatchHandler) Process(ctx context.Context, msg kafka.Message) error {
 		filled = &s
 	}
 
-	return h.Repo.ApplyMatchEvent(ctx, repository.MatchEventApply{
+	in := repository.MatchEventApply{
 		OrderID:        ev.GetOrderId(),
 		Symbol:         ev.GetSymbol(),
 		EventType:      int16(ev.GetEventType()),
 		WalSeq:         ev.GetWalSeq(),
 		FilledQuantity: filled,
-	})
+	}
+	applied, err := h.Repo.ApplyMatchEvent(ctx, in)
+	if err != nil {
+		return err
+	}
+	if !applied || h.Publisher == nil {
+		return nil
+	}
+	o, err := h.Repo.GetOrderByID(ctx, ev.GetOrderId())
+	if err != nil {
+		return fmt.Errorf("match handler: load order for push: %w", err)
+	}
+	if err := h.Publisher.PublishOrderUpdate(ctx, o, in.EventType, in.WalSeq); err != nil {
+		return fmt.Errorf("match handler: publish order update: %w", err)
+	}
+	return nil
 }

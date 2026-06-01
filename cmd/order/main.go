@@ -23,11 +23,13 @@ import (
 	matchengine "github.com/Grizzly1127/trading_matchengine/internal/order/matching"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/outbox"
+	orderpublisher "github.com/Grizzly1127/trading_matchengine/internal/order/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/reconciler"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/service"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -117,6 +119,7 @@ func main() {
 		Symbols:        rulesCfg.Registry,
 	}
 	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: orderSvc})
+	orderv1.RegisterOrderAdminServiceServer(grpcServer, &handler.AdminServer{Repo: repo})
 	balanceSvc := &service.BalanceService{Repo: repo}
 	orderv1.RegisterBalanceServiceServer(grpcServer, &handler.BalanceServer{Svc: balanceSvc})
 
@@ -150,8 +153,26 @@ func main() {
 	}
 	go reconcileSched.Run(ctx)
 
+	var orderPush *orderpublisher.RedisPublisher
+	if cfg.Redis.Addr != "" {
+		rdb, err := redis.NewClient(redis.Config{
+			Addr:     cfg.Redis.Addr,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		if err != nil {
+			log.Fatal().Err(err).Msg("order redis client")
+		}
+		defer rdb.Close()
+		if err := rdb.Ping(ctx); err != nil {
+			log.Fatal().Err(err).Str("redis_addr", cfg.Redis.Addr).Msg("order redis ping")
+		}
+		orderPush = orderpublisher.NewRedisPublisher(rdb)
+		log.Info().Str("redis_addr", cfg.Redis.Addr).Msg("order ws publisher enabled")
+	}
+
 	if cfg.Kafka.ConsumerEnabled {
-		startEventConsumers(ctx, log, cfg, repo)
+		startEventConsumers(ctx, log, cfg, repo, orderPush)
 	}
 
 	go func() {
@@ -189,7 +210,7 @@ func runEventConsumerLoop(ctx context.Context, log zerolog.Logger, run func() er
 	}
 }
 
-func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Config, repo *repository.Repository) {
+func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Config, repo *repository.Repository, orderPush *orderpublisher.RedisPublisher) {
 	base := consumer.TopicConsumerConfig{
 		Brokers:     cfg.Kafka.Brokers,
 		GroupID:     cfg.Kafka.GroupID,
@@ -201,7 +222,7 @@ func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Con
 	go runEventConsumerLoop(ctx, matchLog, func() error {
 		matchCfg := base
 		matchCfg.Topic = cfg.Kafka.MatchTopic
-		return consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{Repo: repo})
+		return consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{Repo: repo, Publisher: orderPush})
 	})
 
 	tradeLog := log.With().Str("component", "trade_consumer").Logger()

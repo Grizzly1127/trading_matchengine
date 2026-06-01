@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package order.v1;
+
+option go_package = "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1;orderv1";
+
+// OrderAdminService 内网管理接口（撮合启动对账 §5.6）。
+service OrderAdminService {
+  // ListReconcileOrders 返回指定交易对 PENDING/PARTIAL 订单（供 Orderbook diff）。
+  rpc ListReconcileOrders(ListReconcileOrdersRequest) returns (ListReconcileOrdersResponse);
+  // GetOrderStatuses 批量查询订单状态（校验盘口孤儿单）。
+  rpc GetOrderStatuses(GetOrderStatusesRequest) returns (GetOrderStatusesResponse);
+}
+
+message ListReconcileOrdersRequest {
+  string symbol = 1;
+}
+
+message ReconcileOrder {
+  uint64 order_id = 1;
+  string status = 2;
+}
+
+message ListReconcileOrdersResponse {
+  repeated ReconcileOrder orders = 1;
+}
+
+message GetOrderStatusesRequest {
+  string symbol = 1;
+  repeated uint64 order_ids = 2;
+}
+
+message OrderStatusRef {
+  uint64 order_id = 1;
+  string status = 2;
+  bool found = 3;
+}
+
+message GetOrderStatusesResponse {
+  repeated OrderStatusRef orders = 1;
+}

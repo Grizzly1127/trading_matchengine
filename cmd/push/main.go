@@ -71,8 +71,8 @@ func main() {
 		log.Fatal().Err(err).Msg("redis ping failed")
 	}
 
-	h := hub.New()
-	ws := &server.WSServer{Hub: h, Redis: rdb, Verifier: verifier, Log: log}
+	h := hub.NewWithLimits(cfg.Limits)
+	ws := &server.WSServer{Hub: h, Redis: rdb, Verifier: verifier, Limits: cfg.Limits, Log: log}
 	sub := &subscriber.RedisFanout{Redis: rdb, Hub: h, Log: log.With().Str("component", "redis_subscriber").Logger()}
 	go func() {
 		if err := sub.Run(ctx); err != nil && ctx.Err() == nil {

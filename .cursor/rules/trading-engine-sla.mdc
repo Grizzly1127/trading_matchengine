@@ -57,4 +57,8 @@ engine.Apply(cmd)
 - 跨 symbol 共享可变 orderbook 状态而无分片隔离。
 - 为“省事”牺牲 WAL 顺序或跳过 fsync（除非架构文档明确允许的批量策略且有测试）。
 
-不确定时先读 `docs/architecture-spec.md` 与 `docs/development-roadmap.md`，再改代码。
+## go版本
+
+- 1.26.3
+
+不确定时先读 `docs/architecture-spec.md` 与 `docs/development-roadmap.md`，还有疑问，则需要主动询问，得到确切的答复后再改代码。

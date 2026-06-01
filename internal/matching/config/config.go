@@ -17,10 +17,19 @@ type Config struct {
 	DefaultSymbol  string                      `json:"default_symbol"`
 	SymbolsFile    string                      `json:"symbols_file"`
 	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
-	MetricsListen  string                      `json:"metrics_listen"`
-	AdminGRPCListen string                     `json:"admin_grpc_listen"`
-	Kafka          KafkaConfig                 `json:"kafka"`
+	MetricsListen   string          `json:"metrics_listen"`
+	AdminGRPCListen string          `json:"admin_grpc_listen"`
+	OrderService    OrderServiceConfig `json:"order_service"`
+	Kafka           KafkaConfig     `json:"kafka"`
 	Log            LogConfig   `json:"log"`
+}
+
+// OrderServiceConfig 启动对账用 Order Admin gRPC（§5.6）。
+type OrderServiceConfig struct {
+	Enabled                      bool   `json:"enabled"`
+	GRPCAddr                     string `json:"grpc_addr"`
+	DialTimeoutSeconds           int    `json:"dial_timeout_seconds"`
+	RecoveryVerifyTimeoutSeconds int    `json:"recovery_verify_timeout_seconds"`
 }
 
 // KafkaConfig 控制 Kafka 消费与发布（3.2）。
@@ -106,6 +115,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		}
 	}
 	c.applyKafkaDefaults(raw)
+	c.applyOrderServiceDefaults(raw)
 	c.applySymbolDefaults()
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
@@ -175,6 +185,21 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func (c *Config) applyOrderServiceDefaults(raw map[string]json.RawMessage) {
+	if _, ok := raw["order_service"]; !ok {
+		c.OrderService.Enabled = true
+		if c.OrderService.GRPCAddr == "" {
+			c.OrderService.GRPCAddr = "localhost:50051"
+		}
+	}
+	if c.OrderService.DialTimeoutSeconds <= 0 {
+		c.OrderService.DialTimeoutSeconds = 3
+	}
+	if c.OrderService.RecoveryVerifyTimeoutSeconds <= 0 {
+		c.OrderService.RecoveryVerifyTimeoutSeconds = 30
+	}
 }
 
 func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {

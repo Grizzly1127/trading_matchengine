@@ -2,9 +2,11 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
@@ -57,6 +59,10 @@ func (h *Handler) processNewOrder(ctx context.Context, cmd *matchingv1.NewOrderC
 
 	before := h.Engine.LastSeq()
 	trades, err := h.Engine.ApplyNewOrder(cmd)
+	if errors.Is(err, engine.ErrSymbolReadOnly) {
+		// 对账只读：不落 WAL、不发布，提交 offset 避免阻塞同 partition 其他 symbol。
+		return nil
+	}
 	if err != nil {
 		return err
 	}

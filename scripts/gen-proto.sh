@@ -28,6 +28,7 @@ protoc \
   matching/v1/events.proto \
   matching/v1/admin.proto \
   order/v1/order.proto \
+  order/v1/admin.proto \
   order/v1/balance.proto \
   marketdata/v1/marketdata.proto \
   kline/v1/kline.proto \

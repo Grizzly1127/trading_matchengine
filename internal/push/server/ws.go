@@ -3,12 +3,16 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/push/hub"
+	"github.com/Grizzly1127/trading_matchengine/internal/push/limits"
 	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
+	"github.com/Grizzly1127/trading_matchengine/pkg/tickerall"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
@@ -18,6 +22,7 @@ type WSServer struct {
 	Hub      *hub.Hub
 	Redis    *redis.Client
 	Verifier *auth.Verifier
+	Limits   limits.Config
 	Log      zerolog.Logger
 }
 
@@ -26,8 +31,9 @@ var upgrader = websocket.Upgrader{
 }
 
 type wsReq struct {
-	Op   string   `json:"op"`
-	Args []string `json:"args"`
+	Op     string   `json:"op"`
+	Args   []string `json:"args"`
+	UserID uint64   `json:"user_id,omitempty"`
 }
 
 type wsResp struct {
@@ -38,8 +44,14 @@ type wsResp struct {
 }
 
 func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	claims, ok := s.verifyClaims(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	marketMaker := auth.HasScopes(claims, auth.ScopePushTickerAll)
+	if !s.Hub.CanRegister(claims.Subject, marketMaker) {
+		http.Error(w, hub.ErrTooManyConnections.Error(), http.StatusTooManyRequests)
 		return
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -47,7 +59,10 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := hub.NewClient(conn)
-	s.Hub.Add(c)
+	if err := s.Hub.Register(c, claims.Subject, marketMaker); err != nil {
+		_ = conn.Close()
+		return
+	}
 	defer func() {
 		s.Hub.Remove(c)
 		_ = conn.Close()
@@ -63,7 +78,7 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		switch strings.ToLower(strings.TrimSpace(req.Op)) {
 		case "subscribe":
-			s.handleSubscribe(r.Context(), c, req.Args)
+			s.handleSubscribe(r.Context(), c, req.Args, req.UserID)
 		case "unsubscribe":
 			for _, ch := range req.Args {
 				c.SetSubscribed(strings.TrimSpace(ch), false)
@@ -77,13 +92,40 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *WSServer) handleSubscribe(ctx context.Context, c *hub.Client, args []string) {
+func (s *WSServer) handleSubscribe(ctx context.Context, c *hub.Client, args []string, reqUserID uint64) {
+	cfg := s.Limits.WithDefaults()
 	accepted := make([]string, 0, len(args))
+	pending := make([]string, 0, len(args))
 	for _, raw := range args {
 		ch := strings.TrimSpace(raw)
 		if !allowedChannel(ch) {
 			_ = writeJSON(c, wsResp{Op: "error", Err: "unsupported channel: " + ch})
 			continue
+		}
+		if !c.MarketMaker && limits.IsTickerAllChannel(ch) {
+			_ = writeJSON(c, wsResp{Op: "error", Err: "ticker@all requires market maker scope"})
+			continue
+		}
+		pending = append(pending, ch)
+	}
+	if !c.MarketMaker && len(pending) > 0 {
+		total := limits.MergeSymbolCount(c.SubscribedChannels(), pending)
+		if total > cfg.RetailMaxSymbolsPerConnection {
+			_ = writeJSON(c, wsResp{Op: "error", Err: fmt.Sprintf(
+				"symbol subscription limit exceeded (max %d)", cfg.RetailMaxSymbolsPerConnection)})
+			return
+		}
+	}
+	for _, ch := range pending {
+		if ch == "order" {
+			if reqUserID == 0 {
+				_ = writeJSON(c, wsResp{Op: "error", Err: "subscribe order requires user_id in frame"})
+				continue
+			}
+			c.UserID = reqUserID
+		}
+		if uid, ok := parseOrderChannelArg(ch); ok {
+			c.UserID = uid
 		}
 		c.SetSubscribed(ch, true)
 		accepted = append(accepted, ch)
@@ -97,9 +139,18 @@ func (s *WSServer) handleSubscribe(ctx context.Context, c *hub.Client, args []st
 			continue
 		}
 		v, err := s.Redis.Get(ctx, key)
-		if err == nil && v != "" {
-			_ = c.Conn.WriteMessage(websocket.TextMessage, []byte(v))
+		if err != nil || v == "" {
+			continue
 		}
+		payload := []byte(v)
+		if limits.IsTickerAllChannel(ch) {
+			frame, err := tickerall.WSSnapshotFromRedisREST(ch, payload)
+			if err != nil {
+				continue
+			}
+			payload = frame
+		}
+		_ = c.Conn.WriteMessage(websocket.TextMessage, payload)
 	}
 	if len(accepted) > 0 {
 		_ = writeJSON(c, wsResp{Op: "subscribed", Args: accepted})
@@ -136,6 +187,12 @@ func writeJSON(c *hub.Client, resp wsResp) error {
 }
 
 func allowedChannel(ch string) bool {
+	if ch == "order" {
+		return true
+	}
+	if _, ok := parseOrderChannelArg(ch); ok {
+		return true
+	}
 	return strings.HasPrefix(ch, "depth:") ||
 		strings.HasPrefix(ch, "ticker:") ||
 		strings.HasPrefix(ch, "trade:") ||
@@ -144,22 +201,33 @@ func allowedChannel(ch string) bool {
 		strings.HasPrefix(ch, "ticker@all")
 }
 
+func parseOrderChannelArg(ch string) (uint64, bool) {
+	if !strings.HasPrefix(ch, "order:") {
+		return 0, false
+	}
+	uid, err := strconv.ParseUint(strings.TrimPrefix(ch, "order:"), 10, 64)
+	if err != nil || uid == 0 {
+		return 0, false
+	}
+	return uid, true
+}
+
 func snapshotKey(ch string) string {
 	if strings.HasPrefix(ch, "depth:") || strings.HasPrefix(ch, "ticker:") || strings.HasPrefix(ch, "index:") {
 		return ch
 	}
 	if strings.HasPrefix(ch, "ticker@all:") {
-		return "ticker:all:" + strings.TrimPrefix(ch, "ticker@all:")
+		return tickerall.RedisKey(strings.TrimPrefix(ch, "ticker@all:"))
 	}
 	if ch == "ticker@all" {
-		return "ticker:all:ALL"
+		return tickerall.RedisKey("ALL")
 	}
 	return ""
 }
 
-func (s *WSServer) authorized(r *http.Request) bool {
+func (s *WSServer) verifyClaims(r *http.Request) (auth.Claims, bool) {
 	if s.Verifier == nil {
-		return false
+		return auth.Claims{}, false
 	}
 	bearer, ok := auth.BearerFromHeader(r.Header.Get("Authorization"))
 	if !ok && len(r.URL.Query()["token"]) > 0 {
@@ -167,13 +235,14 @@ func (s *WSServer) authorized(r *http.Request) bool {
 		ok = bearer != ""
 	}
 	if !ok {
-		// 兼容文档：连接后首帧 {"op":"auth","args":["<jwt>"]} 在 HandleWS 前无法用于升级；
-		// 握手阶段请用 Authorization 或 ?token=。
-		return false
+		return auth.Claims{}, false
 	}
 	claims, err := s.Verifier.VerifyBearer(r.Context(), bearer)
 	if err != nil {
-		return false
+		return auth.Claims{}, false
 	}
-	return auth.HasScopes(claims, auth.ScopePushConnect)
+	if !auth.HasScopes(claims, auth.ScopePushConnect) {
+		return auth.Claims{}, false
+	}
+	return claims, true
 }

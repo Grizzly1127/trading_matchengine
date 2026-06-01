@@ -40,8 +40,9 @@ type RedisConfig struct {
 type PublishConfig struct {
 	DepthIntervalMs      int      `json:"depth_interval_ms"`
 	DepthLimit           int      `json:"depth_limit"`
-	TickerAllIntervalMs  int      `json:"ticker_all_interval_ms"`
-	TickerAllQuoteAssets []string `json:"ticker_all_quote_assets"`
+	TickerAllIntervalMs     int      `json:"ticker_all_interval_ms"`
+	TickerAllHeartbeatSec   int      `json:"ticker_all_heartbeat_sec"`
+	TickerAllQuoteAssets    []string `json:"ticker_all_quote_assets"`
 }
 
 // LogConfig 控制结构化日志。
@@ -110,7 +111,10 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		c.Publish.DepthLimit = 20
 	}
 	if c.Publish.TickerAllIntervalMs <= 0 {
-		c.Publish.TickerAllIntervalMs = 500
+		c.Publish.TickerAllIntervalMs = 100
+	}
+	if c.Publish.TickerAllHeartbeatSec <= 0 {
+		c.Publish.TickerAllHeartbeatSec = 60
 	}
 	if len(c.Publish.TickerAllQuoteAssets) == 0 {
 		c.Publish.TickerAllQuoteAssets = []string{"USDT"}

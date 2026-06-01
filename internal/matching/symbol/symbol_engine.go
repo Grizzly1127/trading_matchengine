@@ -17,6 +17,9 @@ type SymbolEngine struct {
 	QuantityPrecision int32
 	MinQuantity       decimal.Decimal
 	OrderBook         *engine.OrderBook
+	// ReadOnly 为 true 时拒收新单（§5.6 对账不一致）。
+	ReadOnly       bool
+	ReadOnlyReason string
 }
 
 // NewSymbolEngine 创建空规则交易对引擎（测试用）。

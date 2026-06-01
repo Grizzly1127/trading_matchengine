@@ -20,8 +20,11 @@
 | `balances:admin` | `POST /v1/balances` |
 | `market:read` | `GET /v1/klines` |
 | `push:connect` | WebSocket `/v1/ws` |
+| `push:ticker_all` | WS 订阅 `ticker@all` / `ticker@all:{quote}`（做市商） |
 
-`static` 模式放行全部 scope。
+`static` 模式放行全部 scope（含 `push:ticker_all`）。
+
+Push 限流（`configs/push.json` → `limits`）：普通用户每 subject 默认最多 **5** 条连接、每连接最多 **50** 个 symbol 频道；做市商（含 `push:ticker_all`）每 subject 默认最多 **3** 条连接。
 
 ## 轻量签发（dev/staging）
 

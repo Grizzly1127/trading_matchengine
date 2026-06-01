@@ -19,6 +19,7 @@ type Config struct {
 	MarketData     MarketDataConfig            `json:"marketdata"`
 	Matching       MatchingConfig              `json:"matching"`
 	Kafka          KafkaConfig                 `json:"kafka"`
+	Redis          RedisConfig                 `json:"redis"`
 	Reconciler     ReconcilerConfig            `json:"reconciler"`
 	Log            LogConfig                   `json:"log"`
 }
@@ -28,6 +29,13 @@ type MarketDataConfig struct {
 	DialTimeoutSeconds    int     `json:"dial_timeout_seconds"`
 	RequestTimeoutSeconds int     `json:"request_timeout_seconds"`
 	SlippageBuffer        float64 `json:"slippage_buffer"`
+}
+
+// RedisConfig WS 订单推送（order:{user_id}）。
+type RedisConfig struct {
+	Addr     string `json:"addr"`
+	Password string `json:"password"`
+	DB       int    `json:"db"`
 }
 
 // MatchingConfig 撮合对账 gRPC（§4.5）。
@@ -140,6 +148,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		c.MigrateOnStart = true
 	}
 	c.applyKafkaDefaults(raw)
+	c.applyRedisDefaults(raw)
 	c.applyReconcilerDefaults(raw)
 	c.applySymbolDefaults()
 	if c.Log.Level == "" {
@@ -199,6 +208,12 @@ func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
 		}
 	} else if c.Kafka.ConsumerStartOffset == 0 {
 		c.Kafka.ConsumerStartOffset = -1
+	}
+}
+
+func (c *Config) applyRedisDefaults(_ map[string]json.RawMessage) {
+	if c.Redis.Addr == "" {
+		c.Redis.Addr = "localhost:6379"
 	}
 }
 

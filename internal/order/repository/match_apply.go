@@ -20,76 +20,88 @@ type MatchEventApply struct {
 	FilledQuantity *string
 }
 
-// ApplyMatchEvent 幂等更新订单状态（乐观锁 CAS）。
-func (r *Repository) ApplyMatchEvent(ctx context.Context, in MatchEventApply) error {
+// ApplyMatchEvent 幂等更新订单状态（乐观锁 CAS）。applied 表示本条 match 事件首次生效。
+func (r *Repository) ApplyMatchEvent(ctx context.Context, in MatchEventApply) (applied bool, err error) {
 	target, err := status.TargetStatus(status.MatchEventType(in.EventType))
 	if err != nil {
-		return fmt.Errorf("apply match event: %w", err)
+		return false, fmt.Errorf("apply match event: %w", err)
 	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return false, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
 	inserted, err := insertProcessedMatchEvent(ctx, tx, in.OrderID, in.WalSeq, in.EventType)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !inserted {
-		return nil
+		return false, nil
 	}
 
 	order, err := getOrderForUpdate(ctx, tx, in.OrderID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if order.Symbol != in.Symbol {
-		return fmt.Errorf("apply match event: symbol mismatch order=%q event=%q", order.Symbol, in.Symbol)
+		return false, fmt.Errorf("apply match event: symbol mismatch order=%q event=%q", order.Symbol, in.Symbol)
 	}
 
 	if order.Status == target {
 		if err := updateFilledQuantity(ctx, tx, order.ID, order.Version, in.FilledQuantity); err != nil {
-			return err
+			return false, err
 		}
 		// 仅撤单在 match 阶段释放剩余冻结；成交释放等 trade.events 结算后再做（避免 filled_quantity 未更新误释放全部冻结）。
 		if target == status.Canceled {
 			current, err := getOrderForUpdate(ctx, tx, order.ID)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if err := r.releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
-				return err
+				return false, err
 			}
 		}
-		return tx.Commit(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	if status.IsTerminal(order.Status) {
 		// 已 FILLED 等终态时忽略迟到的 ORDER_CANCELED（Matching 撤单 noop 仍会发事件）。
-		return tx.Commit(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	// 成交优先于撤单：CANCELING 可迁移至 ACCEPTED/PARTIAL/FILLED（见 status.AllowedFromStatuses）。
 	if !status.CanTransition(order.Status, target) {
-		return fmt.Errorf("apply match event: invalid transition %s -> %s", order.Status, target)
+		return false, fmt.Errorf("apply match event: invalid transition %s -> %s", order.Status, target)
 	}
 
 	if err := transitionOrderStatus(ctx, tx, order, target, in.FilledQuantity); err != nil {
 		if errors.Is(err, errCASConflict) {
-			return tx.Commit(ctx)
+			if err := tx.Commit(ctx); err != nil {
+				return false, err
+			}
+			return true, nil
 		}
-		return err
+		return false, err
 	}
 	if target == status.Canceled {
 		current, err := getOrderForUpdate(ctx, tx, order.ID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := r.releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repository) releaseOrderRemainingFreeze(ctx context.Context, tx pgx.Tx, o *Order) error {

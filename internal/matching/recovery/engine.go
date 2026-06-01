@@ -164,6 +164,39 @@ func (e *Engine) Close() error {
 	return e.wal.Close()
 }
 
+// IsSymbolReadOnly 交易对是否因对账失败处于只读拒单。
+func (e *Engine) IsSymbolReadOnly(symbol string) bool {
+	if e == nil || e.shard == nil {
+		return false
+	}
+	return e.shard.IsReadOnly(symbol)
+}
+
+// SetSymbolReadOnly 将交易对设为只读拒单。
+func (e *Engine) SetSymbolReadOnly(symbol, reason string) {
+	if e == nil || e.shard == nil {
+		return
+	}
+	e.shard.SetReadOnly(symbol, reason)
+}
+
+// ActiveOrderIDs 返回 symbol 盘口活跃订单 ID。
+func (e *Engine) ActiveOrderIDs(symbol string) []uint64 {
+	if e == nil || e.shard == nil {
+		return nil
+	}
+	se, ok := e.shard.Get(symbol)
+	if !ok || se == nil || se.OrderBook == nil {
+		return nil
+	}
+	active := se.OrderBook.ActiveOrders()
+	out := make([]uint64, 0, len(active))
+	for id := range active {
+		out = append(out, id)
+	}
+	return out
+}
+
 // LookupOrderPresence 查询订单在撮合内存中的存在性（§5.6 对账）。
 func (e *Engine) LookupOrderPresence(symbol string, orderID uint64) presence.Kind {
 	if e == nil || orderID == 0 || symbol == "" {
@@ -192,6 +225,11 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	symbolName := cmd.GetOrder().GetSymbol()
+	if e.shard.IsReadOnly(symbolName) {
+		return nil, engine.ErrSymbolReadOnly
+	}
 
 	orderID := cmd.GetOrder().GetOrderId()
 	if orderID == 0 {

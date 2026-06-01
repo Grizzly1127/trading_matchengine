@@ -19,7 +19,7 @@ func (r *RedisFanout) Run(ctx context.Context) error {
 	if r == nil || r.Redis == nil || r.Hub == nil {
 		return fmt.Errorf("push subscriber not configured")
 	}
-	sub, err := r.Redis.PSubscribe(ctx, "depth:*", "ticker:*", "trade:*", "kline:*", "index:*", "ticker@all:*")
+	sub, err := r.Redis.PSubscribe(ctx, "depth:*", "ticker:*", "trade:*", "kline:*", "index:*", "ticker@all:*", "order:*")
 	if err != nil {
 		return err
 	}
@@ -33,6 +33,11 @@ func (r *RedisFanout) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		r.Hub.Broadcast(msg.Channel, []byte(msg.Payload))
+		payload := []byte(msg.Payload)
+		if uid, ok := hub.ParseOrderChannel(msg.Channel); ok {
+			r.Hub.BroadcastOrder(uid, payload)
+			continue
+		}
+		r.Hub.Broadcast(msg.Channel, payload)
 	}
 }

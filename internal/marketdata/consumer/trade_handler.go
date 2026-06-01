@@ -42,6 +42,16 @@ func (h *TradeHandler) Process(ctx context.Context, msg kafka.Message) error {
 		}
 		return fmt.Errorf("trade handler: publish ticker: %w", err)
 	}
+	tradePayload := publisher.TradePayload(
+		tr.TradeID, tr.Symbol, tr.Price, tr.Quantity,
+		tr.MakerOrderID, tr.TakerOrderID, tr.TradeTimeMs,
+	)
+	if err := h.Publisher.PublishTrade(ctx, tradePayload); err != nil {
+		if h.Metrics != nil {
+			h.Metrics.RedisPublishErrors.Add(1)
+		}
+		return fmt.Errorf("trade handler: publish trade: %w", err)
+	}
 	if h.Metrics != nil {
 		h.Metrics.TradeEvents.Add(1)
 	}

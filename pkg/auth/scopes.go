@@ -8,6 +8,8 @@ const (
 	ScopeBalancesAdmin = "balances:admin"
 	ScopeMarketRead    = "market:read"
 	ScopePushConnect   = "push:connect"
+	// ScopePushTickerAll 做市商全市场 Ticker（ticker@all）；普通用户不得持有。
+	ScopePushTickerAll = "push:ticker_all"
 )
 
 // AllScopes 开发 static 模式下放行的全部 scope。
@@ -18,4 +20,5 @@ var AllScopes = []string{
 	ScopeBalancesAdmin,
 	ScopeMarketRead,
 	ScopePushConnect,
+	ScopePushTickerAll,
 }
