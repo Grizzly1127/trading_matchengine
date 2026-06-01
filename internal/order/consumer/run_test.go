@@ -2,9 +2,11 @@ package consumer
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 )
 
@@ -69,5 +71,39 @@ func TestRun_ProcessesOneMessage(t *testing.T) {
 	}
 	if p.calls != 1 {
 		t.Fatalf("calls=%d want 1", p.calls)
+	}
+}
+
+type staleProcessor struct {
+	calls int
+}
+
+func (p *staleProcessor) Process(context.Context, kafka.Message) error {
+	p.calls++
+	return fmt.Errorf("%w: 99", repository.ErrOrderNotFound)
+}
+
+func TestRun_SkipsStaleOrderNotFound(t *testing.T) {
+	c := &mockConsumer{msgs: []kafka.Message{{Offset: 1}, {Offset: 2}}}
+	p := &staleProcessor{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, c, p) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for p.calls < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if p.calls != 2 {
+		t.Fatalf("calls=%d want 2", p.calls)
+	}
+	if c.idx != 2 {
+		t.Fatalf("idx=%d want 2 (both committed)", c.idx)
 	}
 }

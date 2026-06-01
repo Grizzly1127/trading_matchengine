@@ -13,5 +13,6 @@ func DeriveTradeID(commandSeq, makerOrderID, takerOrderID uint64) uint64 {
 		binary.BigEndian.PutUint64(buf[:], v)
 		_, _ = h.Write(buf[:])
 	}
-	return h.Sum64()
+	// PG trades.trade_id 为 BIGINT（int64）；FNV 可能超过 int64 上限。
+	return h.Sum64() & 0x7fffffffffffffff
 }

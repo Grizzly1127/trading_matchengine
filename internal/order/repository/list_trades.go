@@ -16,6 +16,9 @@ type Trade struct {
 	MakerOrderID uint64
 	TakerOrderID uint64
 	CreatedAt    time.Time
+	UserOrderID  uint64
+	Side         int16
+	IsMaker      bool
 }
 
 // ListTradesFilter 成交列表查询条件。
@@ -47,13 +50,18 @@ func (r *Repository) ListTrades(ctx context.Context, f ListTradesFilter) ([]Trad
 	var b strings.Builder
 	b.WriteString(`
 SELECT t.trade_id, t.symbol, t.price::text, t.quantity::text,
-       t.maker_order_id, t.taker_order_id, t.created_at
+       t.maker_order_id, t.taker_order_id, t.created_at,
+       uo.id, uo.side, (uo.id = t.maker_order_id) AS is_maker
 FROM trades t
-WHERE EXISTS (
-  SELECT 1 FROM orders o
+INNER JOIN LATERAL (
+  SELECT o.id, o.side
+  FROM orders o
   WHERE o.user_id = $1
     AND (o.id = t.maker_order_id OR o.id = t.taker_order_id)
-)`)
+  ORDER BY (o.id = t.maker_order_id) DESC
+  LIMIT 1
+) uo ON true
+WHERE true`)
 	args := []any{f.UserID}
 	n := 1
 
@@ -94,7 +102,8 @@ WHERE EXISTS (
 	for rows.Next() {
 		var t Trade
 		if err := rows.Scan(&t.TradeID, &t.Symbol, &t.Price, &t.Quantity,
-			&t.MakerOrderID, &t.TakerOrderID, &t.CreatedAt); err != nil {
+			&t.MakerOrderID, &t.TakerOrderID, &t.CreatedAt,
+			&t.UserOrderID, &t.Side, &t.IsMaker); err != nil {
 			return nil, fmt.Errorf("list trades scan: %w", err)
 		}
 		out = append(out, t)

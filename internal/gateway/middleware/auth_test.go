@@ -5,12 +5,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 )
 
 func TestAuth_PublicHealth(t *testing.T) {
 	var called bool
-	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(auth.Config{Mode: "static", StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -29,7 +29,7 @@ func TestAuth_PublicHealth(t *testing.T) {
 
 func TestAuth_PublicMarketDepth(t *testing.T) {
 	var called bool
-	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(auth.Config{Mode: "static", StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -47,7 +47,7 @@ func TestAuth_PublicMarketDepth(t *testing.T) {
 }
 
 func TestAuth_MissingToken(t *testing.T) {
-	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	h := Auth(auth.Config{Mode: "static", StaticToken: "secret"})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("should not reach handler")
 	}))
 
@@ -62,7 +62,7 @@ func TestAuth_MissingToken(t *testing.T) {
 
 func TestAuth_ValidTokenSetsUserIDFromHeader(t *testing.T) {
 	var userID uint64
-	h := Auth(config.AuthConfig{StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(auth.Config{Mode: "static", StaticToken: "secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID = UserIDFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))

@@ -39,6 +39,7 @@ build: gen-proto
 	go build -o $(BIN_DIR)/matching ./cmd/matching
 	go build -o $(BIN_DIR)/order ./cmd/order
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
+	go build -o $(BIN_DIR)/auth ./cmd/auth
 	go build -o $(BIN_DIR)/push ./cmd/push
 	go build -o $(BIN_DIR)/kline ./cmd/kline
 	go build -o $(BIN_DIR)/marketdata ./cmd/marketdata
@@ -55,6 +56,10 @@ build-order:
 build-gateway:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
+
+build-auth:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/auth ./cmd/auth
 
 build-push:
 	@mkdir -p $(BIN_DIR)

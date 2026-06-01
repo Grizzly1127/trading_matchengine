@@ -8,16 +8,17 @@ import (
 	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/push/hub"
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
 )
 
 type WSServer struct {
-	Hub   *hub.Hub
-	Redis *redis.Client
-	Token string
-	Log   zerolog.Logger
+	Hub      *hub.Hub
+	Redis    *redis.Client
+	Verifier *auth.Verifier
+	Log      zerolog.Logger
 }
 
 var upgrader = websocket.Upgrader{
@@ -157,11 +158,22 @@ func snapshotKey(ch string) string {
 }
 
 func (s *WSServer) authorized(r *http.Request) bool {
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
-	const prefix = "Bearer "
-	if !strings.HasPrefix(auth, prefix) {
+	if s.Verifier == nil {
 		return false
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
-	return token != "" && token == s.Token
+	bearer, ok := auth.BearerFromHeader(r.Header.Get("Authorization"))
+	if !ok && len(r.URL.Query()["token"]) > 0 {
+		bearer = strings.TrimSpace(r.URL.Query().Get("token"))
+		ok = bearer != ""
+	}
+	if !ok {
+		// 兼容文档：连接后首帧 {"op":"auth","args":["<jwt>"]} 在 HandleWS 前无法用于升级；
+		// 握手阶段请用 Authorization 或 ?token=。
+		return false
+	}
+	claims, err := s.Verifier.VerifyBearer(r.Context(), bearer)
+	if err != nil {
+		return false
+	}
+	return auth.HasScopes(claims, auth.ScopePushConnect)
 }

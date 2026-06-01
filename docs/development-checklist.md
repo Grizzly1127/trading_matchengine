@@ -74,10 +74,10 @@
 - [x] `GET /v1/klines`（转发 Kline gRPC）
 - [x] JSON ↔ gRPC；`order_id` 十进制字符串
 - [x] 统一错误响应
-- [ ] Gateway handler 单测与覆盖率
-- [ ] 端到端联调验收（路线图阶段 4 / `scripts/e2e-api.sh` 全量自动化断言）
-- [ ] `GET /v1/trades`（成交列表，依赖 Order gRPC）
-- [ ] 生产级 JWT / 内网 mTLS（当前硬编码 token，联调用）
+- [x] Gateway handler 单测与覆盖率
+- [x] 端到端联调验收（路线图阶段 4 / `scripts/e2e-api.sh` 全量自动化断言）
+- [x] `GET /v1/trades`（成交列表，依赖 Order gRPC）
+- [x] 生产级 JWT / 内网 mTLS（`pkg/auth`、`cmd/auth` 签发；`static` 联调保留，见 [gateway-auth.md](./gateway-auth.md)）
 
 ### 1.7 Phase 1 架构验收项
 
@@ -197,7 +197,7 @@
 - [ ] API Key 管理 + **HMAC-SHA256** 签名校验
 - [ ] 限流熔断（令牌桶，用户/IP 两级）
 - [ ] 公网 **Web/BFF** 与用户 Session（架构 §2.1.1，通常独立仓库）
-- [ ] 内网 Gateway 仅服务账号 / mTLS
+- [x] 内网 Gateway 仅服务账号 / mTLS（配置示例 `configs/gateway.prod.json.example`）
 
 ### 4.2 审计与备份
 
@@ -268,7 +268,7 @@
 [x] 第 2 步  杀进程重启后盘口正确
 [x] 第 3 步  Kafka 下单 → 成交事件
 [x] 第 4 步  gRPC 下单 → DB 状态 + trades + Outbox（集成测待补）
-[x] 第 5 步  curl REST 主链路（e2e 全量验收 / trades API 待补）
+[x] 第 5 步  curl REST 主链路（e2e 全量断言 + `GET /v1/trades`）
 [~] 第 6 步  WS 收到 depth/ticker/kline/index（trade/order/ticker@all 协议待补）
 [ ] Phase 3  多分片 / K8s / 全链路监控
 [ ] Phase 4  HMAC / 审计 / 压测
@@ -280,7 +280,7 @@
 
 ## 9. 建议实施顺序（摘自差距分析）
 
-1. **P0 — Phase 1 收尾**：Order 集成测试、Gateway 单测与 e2e、`GET /v1/trades`（若产品需要）
+1. **P0 — Phase 1 收尾**：架构 §5.6 启动对账、生产级 JWT/mTLS
 2. **P1 — Phase 2 对外补齐**：Gateway `ticker/all` + `index-price`、dev.sh 纳入 indexprice、`trade:` 推送、`ticker@all` 协议
 3. **P2 — 架构约束**：Matching §5.6 启动对账、全服务 Prometheus、WS `order`
 4. **P3 — 生产化**：Shard Manager → K8s → Phase 4 安全与压测

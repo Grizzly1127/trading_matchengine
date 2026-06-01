@@ -174,6 +174,21 @@ func main() {
 	grpcServer.GracefulStop()
 }
 
+func runEventConsumerLoop(ctx context.Context, log zerolog.Logger, run func() error) {
+	for {
+		if err := run(); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("kafka consumer stopped, retry in 1s")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+		return
+	}
+}
+
 func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Config, repo *repository.Repository) {
 	base := consumer.TopicConsumerConfig{
 		Brokers:     cfg.Kafka.Brokers,
@@ -183,22 +198,18 @@ func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Con
 	}
 
 	matchLog := log.With().Str("component", "match_consumer").Logger()
-	go func() {
+	go runEventConsumerLoop(ctx, matchLog, func() error {
 		matchCfg := base
 		matchCfg.Topic = cfg.Kafka.MatchTopic
-		if err := consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{Repo: repo}); err != nil && ctx.Err() == nil {
-			matchLog.Error().Err(err).Msg("match consumer stopped")
-		}
-	}()
+		return consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{Repo: repo})
+	})
 
 	tradeLog := log.With().Str("component", "trade_consumer").Logger()
-	go func() {
+	go runEventConsumerLoop(ctx, tradeLog, func() error {
 		tradeCfg := base
 		tradeCfg.Topic = cfg.Kafka.TradeTopic
-		if err := consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{Repo: repo}); err != nil && ctx.Err() == nil {
-			tradeLog.Error().Err(err).Msg("trade consumer stopped")
-		}
-	}()
+		return consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{Repo: repo})
+	})
 }
 
 func startOrderMetricsHTTP(ctx context.Context, log zerolog.Logger, addr string) {

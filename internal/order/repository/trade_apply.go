@@ -23,8 +23,16 @@ type TradeEventApply struct {
 	WalSeq       uint64
 }
 
+const maxPostgresTradeID = uint64(1<<63 - 1)
+
 // ApplyTradeEvent 幂等写入成交并结算双方余额。
 func (r *Repository) ApplyTradeEvent(ctx context.Context, in TradeEventApply) error {
+	if in.TradeID == 0 {
+		return fmt.Errorf("apply trade event: trade_id is required")
+	}
+	if in.TradeID > maxPostgresTradeID {
+		return fmt.Errorf("%w: trade_id %d exceeds BIGINT", ErrSkippableEvent, in.TradeID)
+	}
 	price, err := decimal.NewFromString(in.Price)
 	if err != nil || !price.IsPositive() {
 		return fmt.Errorf("apply trade event: invalid price %q", in.Price)

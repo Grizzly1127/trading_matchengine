@@ -89,6 +89,10 @@ message TradeInfo {
   uint64 maker_order_id = 5;
   uint64 taker_order_id = 6;
   google.protobuf.Timestamp created_at = 7;
+  // 查询用户在本笔成交中的订单（REST order_id）。
+  uint64 order_id = 8;
+  string side = 9;
+  bool is_maker = 10;
 }
 
 message ListTradesResponse {

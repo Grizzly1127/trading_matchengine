@@ -14,7 +14,11 @@
   },
   "symbols_file": "configs/symbols.json",
   "auth": {
+    "mode": "static",
     "static_token": "dev-token-change-me"
+  },
+  "tls": {
+    "enabled": false
   },
   "log": {
     "level": "info",

@@ -127,29 +127,40 @@ func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Con
 	}
 
 	matchLog := log.With().Str("component", "match_consumer").Logger()
-	go func() {
+	go runMarketdataConsumerLoop(ctx, matchLog, func() error {
 		matchCfg := base
 		matchCfg.Topic = cfg.Kafka.MatchTopic
-		if err := consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{
+		return consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{
 			Store:   st,
 			Metrics: m,
-		}); err != nil && ctx.Err() == nil {
-			matchLog.Error().Err(err).Msg("match consumer stopped")
-		}
-	}()
+		})
+	})
 
 	tradeLog := log.With().Str("component", "trade_consumer").Logger()
-	go func() {
+	go runMarketdataConsumerLoop(ctx, tradeLog, func() error {
 		tradeCfg := base
 		tradeCfg.Topic = cfg.Kafka.TradeTopic
-		if err := consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{
+		return consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{
 			Store:     st,
 			Publisher: pub,
 			Metrics:   m,
-		}); err != nil && ctx.Err() == nil {
-			tradeLog.Error().Err(err).Msg("trade consumer stopped")
+		})
+	})
+}
+
+func runMarketdataConsumerLoop(ctx context.Context, log zerolog.Logger, run func() error) {
+	for {
+		if err := run(); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("kafka consumer stopped, retry in 1s")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
 		}
-	}()
+		return
+	}
 }
 
 func startDepthPublisher(ctx context.Context, log zerolog.Logger, cfg config.Config, st *store.Store, pub *publisher.RedisPublisher, m *metrics.Counters) {

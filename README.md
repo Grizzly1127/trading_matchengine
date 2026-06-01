@@ -87,7 +87,15 @@ make build
 # 或分步：./scripts/e2e-api.sh step deposit
 ```
 
-默认 Token：`configs/gateway.json` 中 `auth.static_token`（与 Push 相同）。
+默认联调：`configs/gateway.json` 中 `auth.mode=static` + `auth.static_token`（与 Push 相同）。
+
+生产形态（服务 JWT + scope + 可选 mTLS）：见 [docs/gateway-auth.md](docs/gateway-auth.md)。
+
+```bash
+# JWT 本地全栈
+./scripts/dev.sh start --build --auth --jwt
+./scripts/e2e-api.sh jwt
+```
 
 ### 5. 单服务脚本
 
@@ -99,6 +107,7 @@ make build
 | `./scripts/kline.sh` | K 线 |
 | `./scripts/push.sh` | WebSocket 推送 |
 | `./scripts/gateway.sh` | API 网关 |
+| `./scripts/auth.sh` | 服务 JWT 签发（dev，:8090） |
 
 ```bash
 ./scripts/order.sh start --build

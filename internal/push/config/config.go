@@ -1,21 +1,21 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 )
 
 type Config struct {
-	HTTPListen string      `json:"http_listen"`
-	Auth       AuthConfig  `json:"auth"`
-	Redis      RedisConfig `json:"redis"`
-	Log        LogConfig   `json:"log"`
-}
-
-type AuthConfig struct {
-	StaticToken string `json:"static_token"`
+	HTTPListen string         `json:"http_listen"`
+	Auth       auth.Config    `json:"auth"`
+	TLS        auth.TLSConfig `json:"tls"`
+	Redis      RedisConfig    `json:"redis"`
+	Log        LogConfig      `json:"log"`
 }
 
 type RedisConfig struct {
@@ -53,7 +53,10 @@ func Load(path string) (Config, error) {
 	if cfg.HTTPListen == "" {
 		cfg.HTTPListen = ":8081"
 	}
-	if cfg.Auth.StaticToken == "" {
+	if strings.TrimSpace(cfg.Auth.Mode) == "" {
+		cfg.Auth.Mode = "static"
+	}
+	if cfg.Auth.Mode == "static" && cfg.Auth.StaticToken == "" {
 		cfg.Auth.StaticToken = "dev-token-change-me"
 	}
 	if cfg.Redis.Addr == "" {
@@ -76,5 +79,12 @@ func Load(path string) (Config, error) {
 			cfg.Log.MaxAgeDays = 7
 		}
 	}
+	if err := cfg.Auth.Normalize(); err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
 	return cfg, nil
+}
+
+func (c Config) NewVerifier(ctx context.Context) (*auth.Verifier, error) {
+	return auth.NewVerifier(ctx, c.Auth)
 }

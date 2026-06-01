@@ -6,6 +6,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/handler"
 	gwmw "github.com/Grizzly1127/trading_matchengine/internal/gateway/middleware"
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
@@ -17,6 +18,7 @@ import (
 type Deps struct {
 	Log        zerolog.Logger
 	Config     config.Config
+	Verifier   *auth.Verifier
 	Order      orderv1.OrderServiceClient
 	Balance    orderv1.BalanceServiceClient
 	MarketData marketdatav1.MarketDataServiceClient
@@ -29,23 +31,40 @@ type Deps struct {
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(gwmw.RequestID)
-	r.Use(gwmw.Auth(deps.Config.Auth))
 	r.Use(gwmw.Recover(deps.Log))
 	r.Use(gwmw.AccessLog(deps.Log))
 
 	r.Get("/v1/health", handler.Health)
 	r.Get("/v1/time", handler.Time)
 
+	authenticate := gwmw.Authenticate(deps.Verifier)
+
 	orderH := &handler.Orders{Orders: deps.Order, Log: deps.Log}
-	r.Post("/v1/orders", orderH.PlaceOrder)
-	r.Get("/v1/orders", orderH.ListOrders)
-	r.Get("/v1/orders/{order_id}", orderH.GetOrder)
-	r.Delete("/v1/orders/{order_id}", orderH.CancelOrder)
+	r.Group(func(r chi.Router) {
+		r.Use(authenticate, gwmw.RequireScopes(auth.ScopeOrdersWrite))
+		r.Post("/v1/orders", orderH.PlaceOrder)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(authenticate, gwmw.RequireScopes(auth.ScopeOrdersRead))
+		r.Get("/v1/orders", orderH.ListOrders)
+		r.Get("/v1/orders/{order_id}", orderH.GetOrder)
+		r.Get("/v1/trades", orderH.ListTrades)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(authenticate, gwmw.RequireScopes(auth.ScopeOrdersWrite))
+		r.Delete("/v1/orders/{order_id}", orderH.CancelOrder)
+	})
 
 	balanceH := &handler.Balances{Balances: deps.Balance, Log: deps.Log}
-	r.Post("/v1/balances", balanceH.UpdateBalance)
-	r.Get("/v1/balances", balanceH.ListBalances)
-	r.Get("/v1/balances/{asset}", balanceH.GetBalance)
+	r.Group(func(r chi.Router) {
+		r.Use(authenticate, gwmw.RequireScopes(auth.ScopeBalancesAdmin))
+		r.Post("/v1/balances", balanceH.UpdateBalance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(authenticate, gwmw.RequireScopes(auth.ScopeBalancesRead))
+		r.Get("/v1/balances", balanceH.ListBalances)
+		r.Get("/v1/balances/{asset}", balanceH.GetBalance)
+	})
 
 	marketH := &handler.Market{MarketData: deps.MarketData, SymbolRules: deps.Symbols, AssetRules: deps.Assets, Log: deps.Log}
 	r.Get("/v1/market/depth", marketH.Depth)
@@ -54,7 +73,10 @@ func NewRouter(deps Deps) http.Handler {
 
 	if deps.Kline != nil {
 		klineH := &handler.Kline{Client: deps.Kline, Log: deps.Log}
-		r.Get("/v1/klines", klineH.List)
+		r.Group(func(r chi.Router) {
+			r.Use(authenticate, gwmw.RequireScopes(auth.ScopeMarketRead))
+			r.Get("/v1/klines", klineH.List)
+		})
 	}
 
 	return r

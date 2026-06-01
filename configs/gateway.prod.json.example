@@ -1,0 +1,44 @@
+{
+  "http_listen": ":8443",
+  "order_service": {
+    "grpc_addr": "order.internal:50051",
+    "dial_seconds": 10
+  },
+  "marketdata_service": {
+    "grpc_addr": "marketdata.internal:50052",
+    "dial_seconds": 10
+  },
+  "kline_service": {
+    "grpc_addr": "kline.internal:50053",
+    "dial_seconds": 10
+  },
+  "symbols_file": "configs/symbols.json",
+  "auth": {
+    "mode": "jwt",
+    "jwt": {
+      "audience": ["trading-gateway", "trading-push"],
+      "issuers": [
+        {
+          "issuer": "https://auth.your-company.internal",
+          "jwks_url": "https://auth.your-company.internal/.well-known/jwks.json"
+        },
+        {
+          "issuer": "trading-matchengine-dev",
+          "hs256_secret_file": "/etc/trading/auth-hs256.secret"
+        }
+      ]
+    }
+  },
+  "tls": {
+    "enabled": true,
+    "cert_file": "/etc/trading/tls/gateway.crt",
+    "key_file": "/etc/trading/tls/gateway.key",
+    "client_ca_file": "/etc/trading/tls/ca.crt",
+    "require_client_cert": true
+  },
+  "log": {
+    "level": "info",
+    "dev": false,
+    "file": "logs/gateway.log"
+  }
+}

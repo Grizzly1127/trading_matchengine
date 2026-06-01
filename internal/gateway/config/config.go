@@ -1,10 +1,13 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 )
 
 // Config 是 gateway 进程启动配置。
@@ -15,18 +18,14 @@ type Config struct {
 	KlineService      ServiceConfig               `json:"kline_service"`
 	SymbolsFile       string                      `json:"symbols_file"`
 	Symbols           map[string]SymbolRuleConfig `json:"symbols"`
-	Auth              AuthConfig                  `json:"auth"`
-	Log               LogConfig     `json:"log"`
+	Auth              auth.Config                 `json:"auth"`
+	TLS               auth.TLSConfig              `json:"tls"`
+	Log               LogConfig                   `json:"log"`
 }
 
 type ServiceConfig struct {
 	GRPCAddr    string `json:"grpc_addr"`
 	GRPCDialSec int    `json:"dial_seconds"`
-}
-
-// AuthConfig Phase 1 静态 Bearer 鉴权（用户 ID 由请求传入，见 rest-api §2.2）。
-type AuthConfig struct {
-	StaticToken string `json:"static_token"`
 }
 
 // LogConfig 控制结构化日志。
@@ -66,7 +65,15 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults(raw)
+	if err := cfg.Auth.Normalize(); err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
 	return cfg, nil
+}
+
+// NewVerifier 构造 Gateway 鉴权验签器。
+func (c Config) NewVerifier(ctx context.Context) (*auth.Verifier, error) {
+	return auth.NewVerifier(ctx, c.Auth)
 }
 
 func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
@@ -79,7 +86,10 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	c.applyServiceDefaults(c.KlineService, "localhost:50053", 10)
 	c.applySymbolDefaults()
 
-	if c.Auth.StaticToken == "" {
+	if strings.TrimSpace(c.Auth.Mode) == "" {
+		c.Auth.Mode = "static"
+	}
+	if c.Auth.Mode == "static" && c.Auth.StaticToken == "" {
 		c.Auth.StaticToken = "dev-token-change-me"
 	}
 	if c.Log.Level == "" {

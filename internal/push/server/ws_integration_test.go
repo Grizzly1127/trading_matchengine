@@ -10,6 +10,7 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/push/hub"
 	"github.com/Grizzly1127/trading_matchengine/internal/push/subscriber"
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gorilla/websocket"
@@ -27,11 +28,19 @@ func TestWSReceiveFromRedisPublish(t *testing.T) {
 	defer rdb.Close()
 
 	h := hub.New()
+	verifier, err := auth.NewVerifier(context.Background(), auth.Config{
+		Mode:        "static",
+		StaticToken: "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verifier.Close()
 	wsServer := &WSServer{
-		Hub:   h,
-		Redis: rdb,
-		Token: "secret",
-		Log:   zerolog.Nop(),
+		Hub:      h,
+		Redis:    rdb,
+		Verifier: verifier,
+		Log:      zerolog.Nop(),
 	}
 	fanout := &subscriber.RedisFanout{
 		Redis: rdb,

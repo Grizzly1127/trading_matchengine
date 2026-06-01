@@ -14,6 +14,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/client"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/server"
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 )
@@ -53,6 +54,12 @@ func main() {
 	log := logRes.Logger
 	initCtx := context.Background()
 
+	verifier, err := cfg.NewVerifier(initCtx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("auth verifier")
+	}
+	defer verifier.Close()
+
 	orderClients, err := client.ConnectOrder(initCtx, cfg.OrderService)
 	if err != nil {
 		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderService.GRPCAddr).Msg("connect order service")
@@ -79,12 +86,18 @@ func main() {
 		klineClient = klClients.Client
 	}
 
+	tlsCfg, err := auth.ServerTLS(cfg.TLS)
+	if err != nil {
+		log.Fatal().Err(err).Msg("tls config")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	router := server.NewRouter(server.Deps{
 		Log:        log,
 		Config:     cfg,
+		Verifier:   verifier,
 		Order:      orderClients.OrderClient,
 		Balance:    orderClients.BalanceClient,
 		MarketData: mdClients.Client,
@@ -96,17 +109,26 @@ func main() {
 		Addr:              cfg.HTTPListen,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
+		TLSConfig:         tlsCfg,
 	}
 
 	go func() {
 		log.Info().
 			Str("config", *configPath).
 			Str("http_listen", cfg.HTTPListen).
+			Str("auth_mode", cfg.Auth.Mode).
+			Bool("tls_enabled", cfg.TLS.Enabled).
 			Str("order_grpc_addr", cfg.OrderService.GRPCAddr).
 			Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).
 			Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).
 			Msg("gateway ready")
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if tlsCfg != nil {
+			err = httpServer.ListenAndServeTLS("", "")
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("http serve")
 		}
 	}()

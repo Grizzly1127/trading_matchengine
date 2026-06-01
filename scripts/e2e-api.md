@@ -3,14 +3,24 @@
 可执行脚本：[e2e-api.sh](./e2e-api.sh)
 
 ```bash
-# 启动全部服务后
+# 启动全部服务后（static，默认）
 ./scripts/dev.sh start --build
-./scripts/e2e-api.sh
+./scripts/e2e-api.sh          # 全流程：需 jq，对 health/充值/撮合/订单/成交/行情做断言
 
-# 分步
+# JWT + scope 联调（Gateway/Push 走 jwt 配置）
+./scripts/dev.sh start --build --auth --jwt
+./scripts/e2e-api.sh jwt      # 向 :8090 换 token 后跑与 static 相同断言
+
+# 仅验证能换到 JWT
+./scripts/e2e-api.sh jwt step jwt-auth
+
+# 分步（无 jq 时可用 SKIP_ASSERT=1）
 ./scripts/e2e-api.sh step deposit
 ./scripts/e2e-api.sh step orders
+./scripts/e2e-api.sh step query   # 含 GET /v1/trades
 ```
+
+若出现 `orderbook BTC-USDT not found`：多为行情尚未消费到 `ORDER_ACCEPTED`（固定 `sleep` 不够）。脚本已改为轮询；可调大 `PIPELINE_WAIT_SEC=60`，并确认 `matching`、`marketdata`、Kafka 正常。
 
 统一变量（与脚本一致）：
 

@@ -97,7 +97,12 @@ Gateway 保持 **薄**：协议转换、统一信封、`X-Request-Id`、gRPC 错
 
 #### Phase 1：Bearer Token + 请求指定用户
 
-Gateway 校验内网调用方 Token；**操作用户**由请求显式传入（Web/BFF 在登录后填入真实 `user_id`）。业务请求头：
+Gateway 校验内网调用方 Token；**操作用户**由请求显式传入（Web/BFF 在登录后填入真实 `user_id`）。
+
+- 本地联调：`auth.mode=static`（见 `configs/gateway.json`）。
+- 生产：`auth.mode=jwt` + 可选 mTLS，scope 见 [gateway-auth.md](./gateway-auth.md)；JWT 可由 `cmd/auth`（dev）或外部 IdP 签发。
+
+业务请求头：
 
 ```http
 Authorization: Bearer <access_token>
@@ -1044,7 +1049,7 @@ trade.events / match.events
 | `GET`    | `/v1/balances`                      | 全部资产余额             | Order               |
 | `GET`    | `/v1/balances/{asset}`              | 单资产余额              | Order               |
 | `POST`   | `/v1/balances`                      | 调账/充值（联调）          | Order               |
-| `GET`    | `/v1/trades`                        | 成交列表（Gateway 未实现）  | Order               |
+| `GET`    | `/v1/trades`                        | 成交列表                 | Order               |
 | `GET`    | `/v1/market/depth`                  | 深度                 | Market Data         |
 | `GET`    | `/v1/market/ticker`                 | Ticker（单/批量）       | Market Data         |
 | `GET`    | `/v1/market/ticker/all`             | 全市场 Ticker 快照（做市商） | Market Data / Redis |

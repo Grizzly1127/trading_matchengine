@@ -652,14 +652,18 @@ func (x *ListTradesRequest) GetPageSize() int32 {
 }
 
 type TradeInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TradeId       uint64                 `protobuf:"varint,1,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
-	Symbol        string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
-	Price         *v1.Decimal            `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
-	Quantity      *v1.Decimal            `protobuf:"bytes,4,opt,name=quantity,proto3" json:"quantity,omitempty"`
-	MakerOrderId  uint64                 `protobuf:"varint,5,opt,name=maker_order_id,json=makerOrderId,proto3" json:"maker_order_id,omitempty"`
-	TakerOrderId  uint64                 `protobuf:"varint,6,opt,name=taker_order_id,json=takerOrderId,proto3" json:"taker_order_id,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	TradeId      uint64                 `protobuf:"varint,1,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	Symbol       string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Price        *v1.Decimal            `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity     *v1.Decimal            `protobuf:"bytes,4,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	MakerOrderId uint64                 `protobuf:"varint,5,opt,name=maker_order_id,json=makerOrderId,proto3" json:"maker_order_id,omitempty"`
+	TakerOrderId uint64                 `protobuf:"varint,6,opt,name=taker_order_id,json=takerOrderId,proto3" json:"taker_order_id,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// 查询用户在本笔成交中的订单（REST order_id）。
+	OrderId       uint64 `protobuf:"varint,8,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	Side          string `protobuf:"bytes,9,opt,name=side,proto3" json:"side,omitempty"`
+	IsMaker       bool   `protobuf:"varint,10,opt,name=is_maker,json=isMaker,proto3" json:"is_maker,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -741,6 +745,27 @@ func (x *TradeInfo) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *TradeInfo) GetOrderId() uint64 {
+	if x != nil {
+		return x.OrderId
+	}
+	return 0
+}
+
+func (x *TradeInfo) GetSide() string {
+	if x != nil {
+		return x.Side
+	}
+	return ""
+}
+
+func (x *TradeInfo) GetIsMaker() bool {
+	if x != nil {
+		return x.IsMaker
+	}
+	return false
 }
 
 type ListTradesResponse struct {
@@ -963,7 +988,7 @@ const file_order_v1_order_proto_rawDesc = "" +
 	"\x0fcreated_at_from\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rcreatedAtFrom\x12>\n" +
 	"\rcreated_at_to\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vcreatedAtTo\x12\x12\n" +
 	"\x04page\x18\x06 \x01(\x05R\x04page\x12\x1b\n" +
-	"\tpage_size\x18\a \x01(\x05R\bpageSize\"\x9f\x02\n" +
+	"\tpage_size\x18\a \x01(\x05R\bpageSize\"\xe9\x02\n" +
 	"\tTradeInfo\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\x04R\atradeId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12(\n" +
@@ -972,7 +997,11 @@ const file_order_v1_order_proto_rawDesc = "" +
 	"\x0emaker_order_id\x18\x05 \x01(\x04R\fmakerOrderId\x12$\n" +
 	"\x0etaker_order_id\x18\x06 \x01(\x04R\ftakerOrderId\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"A\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x19\n" +
+	"\border_id\x18\b \x01(\x04R\aorderId\x12\x12\n" +
+	"\x04side\x18\t \x01(\tR\x04side\x12\x19\n" +
+	"\bis_maker\x18\n" +
+	" \x01(\bR\aisMaker\"A\n" +
 	"\x12ListTradesResponse\x12+\n" +
 	"\x06trades\x18\x01 \x03(\v2\x13.order.v1.TradeInfoR\x06trades\"\xda\x03\n" +
 	"\tOrderInfo\x12\x19\n" +

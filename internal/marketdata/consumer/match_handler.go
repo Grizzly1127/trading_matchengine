@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
@@ -12,6 +13,9 @@ import (
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 )
+
+// ErrSkipMatchEvent 表示可跳过的 match 事件（如市价单 ACCEPTED、Kafka 历史脏数据）。
+var ErrSkipMatchEvent = errors.New("skip match event")
 
 // MatchHandler 消费 match.events 并维护内存 orderbook 镜像。
 type MatchHandler struct {
@@ -60,16 +64,25 @@ func (h *MatchHandler) applyAccepted(ev *matchingv1.MatchEvent) error {
 	if o == nil {
 		return nil
 	}
-	if o.GetPrice() == nil || o.GetRemaining() == nil {
-		return fmt.Errorf("match handler: accepted order missing price/remaining")
+	// 市价单不入簿；Matching 仍会发 ACCEPTED 供 Order 状态机使用。
+	if o.GetType() == commonv1.OrderType_ORDER_TYPE_MARKET {
+		return nil
+	}
+	price := o.GetPrice()
+	rem := o.GetRemaining()
+	if rem == nil && o.GetQuantity() != nil {
+		rem = o.GetQuantity()
+	}
+	if price == nil || rem == nil {
+		return fmt.Errorf("%w: accepted order missing price/remaining", ErrSkipMatchEvent)
 	}
 	sideStr := sideToString(o.GetSide())
 	return h.Store.ApplyOrderBookAccepted(
 		ev.GetSymbol(),
 		ev.GetOrderId(),
 		sideStr,
-		o.GetPrice().GetValue(),
-		o.GetRemaining().GetValue(),
+		price.GetValue(),
+		rem.GetValue(),
 	)
 }
 

@@ -1,7 +1,11 @@
 {
   "http_listen": ":8081",
   "auth": {
+    "mode": "static",
     "static_token": "dev-token-change-me"
+  },
+  "tls": {
+    "enabled": false
   },
   "redis": {
     "addr": "localhost:6379",

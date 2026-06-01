@@ -231,6 +231,20 @@ func toTradeInfoPB(t *repository.Trade) *orderv1.TradeInfo {
 		MakerOrderId: t.MakerOrderID,
 		TakerOrderId: t.TakerOrderID,
 		CreatedAt:    timestamppb.New(t.CreatedAt.UTC()),
+		OrderId:      t.UserOrderID,
+		Side:         tradeSideLabel(t.Side),
+		IsMaker:      t.IsMaker,
+	}
+}
+
+func tradeSideLabel(side int16) string {
+	switch commonv1.Side(side) {
+	case commonv1.Side_SIDE_BUY:
+		return "BUY"
+	case commonv1.Side_SIDE_SELL:
+		return "SELL"
+	default:
+		return ""
 	}
 }
 
