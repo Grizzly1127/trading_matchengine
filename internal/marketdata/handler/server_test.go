@@ -35,6 +35,34 @@ func TestServerGetOrderBookAndTicker(t *testing.T) {
 	if ticker.GetTicker().GetLastPrice().GetValue() != "65005" {
 		t.Fatalf("unexpected ticker: %+v", ticker.GetTicker())
 	}
+	if ticker.GetTicker().GetOpenPrice().GetValue() != "65005" {
+		t.Fatalf("open should equal first trade: %+v", ticker.GetTicker())
+	}
+	if ticker.GetTicker().GetPriceChangePercent().GetValue() != "0" {
+		t.Fatalf("single trade change%%: %+v", ticker.GetTicker().GetPriceChangePercent())
+	}
+}
+
+func TestServerGetTickerOHLC(t *testing.T) {
+	t.Parallel()
+	st := store.New()
+	base := int64(2_000_000)
+	must(t, st.ApplyTrade("BTC-USDT", "100", "1", base))
+	must(t, st.ApplyTrade("BTC-USDT", "120", "1", base+1))
+	must(t, st.ApplyTrade("BTC-USDT", "80", "1", base+2))
+	srv := NewServer(st)
+
+	resp, err := srv.GetTicker(context.Background(), &marketdatav1.GetTickerRequest{Symbol: "BTC-USDT"})
+	if err != nil {
+		t.Fatalf("GetTicker: %v", err)
+	}
+	tk := resp.GetTicker()
+	if tk.GetHighPrice().GetValue() != "120" || tk.GetLowPrice().GetValue() != "80" {
+		t.Fatalf("high/low: %+v", tk)
+	}
+	if tk.GetPriceChangePercent().GetValue() != "-20.00" {
+		t.Fatalf("change%%=%s", tk.GetPriceChangePercent().GetValue())
+	}
 }
 
 func TestServerGetReferencePrice(t *testing.T) {

@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
@@ -31,6 +32,12 @@ func Run(ctx context.Context, c kafka.Consumer, h Processor) error {
 		}
 
 		if err := h.Process(ctx, msg); err != nil {
+			if errors.Is(err, ErrSkipMatchEvent) {
+				if err := c.Commit(ctx, msg); err != nil {
+					return fmt.Errorf("consumer: commit skipped offset %d: %w", msg.Offset, err)
+				}
+				continue
+			}
 			return fmt.Errorf("consumer: process offset %d: %w", msg.Offset, err)
 		}
 		if err := c.Commit(ctx, msg); err != nil {

@@ -1,0 +1,21 @@
+{
+  "http_listen": ":8080",
+  "order_service": { "grpc_addr": "localhost:50051", "dial_seconds": 10 },
+  "marketdata_service": { "grpc_addr": "localhost:50052", "dial_seconds": 10 },
+  "kline_service": { "grpc_addr": "localhost:50053", "dial_seconds": 10 },
+  "symbols_file": "configs/symbols.json",
+  "auth": {
+    "mode": "jwt",
+    "jwt": {
+      "audience": ["trading-gateway", "trading-push"],
+      "issuers": [
+        {
+          "issuer": "trading-matchengine-dev",
+          "hs256_secret_file": "configs/auth-dev-hs256.secret"
+        }
+      ]
+    }
+  },
+  "tls": { "enabled": false },
+  "log": { "level": "info", "dev": true }
+}

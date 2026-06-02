@@ -26,9 +26,12 @@ protoc \
   matching/v1/snapshot.proto \
   matching/v1/envelope.proto \
   matching/v1/events.proto \
+  matching/v1/admin.proto \
   order/v1/order.proto \
+  order/v1/admin.proto \
   order/v1/balance.proto \
   marketdata/v1/marketdata.proto \
-  kline/v1/kline.proto
+  kline/v1/kline.proto \
+  index/v1/index.proto
 
 echo "ok: generated under ${OUT_DIR}"

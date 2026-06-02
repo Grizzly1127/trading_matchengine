@@ -23,13 +23,24 @@ go.work.sum
 *.swp
 *.swo
 
+# Auth secrets & dev TLS
+configs/auth-dev-hs256.secret
+configs/gateway.jwt-dev.json
+configs/push.jwt-dev.json
+configs/dev-mtls/
+/etc/trading/
+
 # Env & local data
 .env
 .env.*
 !.env.example
 /data/
 /run/
+/logs/
 *.log
+*.log.gz
+*.stdout
+*.stderr
 
 # Proto generated (uncomment when using buf/protoc)
 # proto/**/*.pb.go

@@ -12,10 +12,13 @@ import (
 
 // Trade 从 trade.events 解码出的成交字段。
 type Trade struct {
-	Symbol      string
-	Price       string
-	Quantity    string
-	TradeTimeMs int64
+	TradeID       uint64
+	Symbol        string
+	Price         string
+	Quantity      string
+	MakerOrderID  uint64
+	TakerOrderID  uint64
+	TradeTimeMs   int64
 }
 
 // ParseKafkaMessage 解码 Kafka 消息中的 TradeEvent。
@@ -41,9 +44,12 @@ func ParseKafkaMessage(msg kafka.Message) (Trade, error) {
 		tradeTimeMs = ct.AsTime().UnixMilli()
 	}
 	return Trade{
-		Symbol:      symbol,
-		Price:       tr.GetPrice().GetValue(),
-		Quantity:    tr.GetQuantity().GetValue(),
-		TradeTimeMs: tradeTimeMs,
+		TradeID:      tr.GetTradeId(),
+		Symbol:       symbol,
+		Price:        tr.GetPrice().GetValue(),
+		Quantity:     tr.GetQuantity().GetValue(),
+		MakerOrderID: tr.GetMakerOrderId(),
+		TakerOrderID: tr.GetTakerOrderId(),
+		TradeTimeMs:  tradeTimeMs,
 	}, nil
 }

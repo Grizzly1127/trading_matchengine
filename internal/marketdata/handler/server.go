@@ -114,10 +114,10 @@ func (s *Server) GetTickerAllSnapshot(ctx context.Context, req *marketdatav1.Get
 	for _, item := range snap.Items {
 		pbItems = append(pbItems, &marketdatav1.TickerAllItem{
 			Symbol:             item.Symbol,
-			LastPrice:          dec(item.LastPrice.String()),
-			Volume:             dec(item.Volume.String()),
-			QuoteVolume:        dec(item.QuoteVolume.String()),
-			PriceChangePercent: dec("0"),
+			LastPrice:          dec(store.FormatDecimal(item.LastPrice)),
+			Volume:             dec(store.FormatDecimal(item.Volume)),
+			QuoteVolume:        dec(store.FormatDecimal(item.QuoteVolume)),
+			PriceChangePercent: dec(store.FormatPercent(item.PriceChangePercent)),
 			Timestamp:          millisToTimestamp(item.UpdatedAtMs),
 		})
 	}
@@ -144,13 +144,13 @@ func toPBLevels(levels []store.PriceLevel) []*marketdatav1.PriceLevel {
 func toPBTicker(symbol string, t store.TickerState) *marketdatav1.Ticker {
 	return &marketdatav1.Ticker{
 		Symbol:             symbol,
-		LastPrice:          dec(t.LastPrice.String()),
-		OpenPrice:          dec(t.LastPrice.String()),
-		HighPrice:          dec(t.LastPrice.String()),
-		LowPrice:           dec(t.LastPrice.String()),
-		Volume:             dec(t.Volume.String()),
-		QuoteVolume:        dec(t.QuoteVolume.String()),
-		PriceChangePercent: dec("0"),
+		LastPrice:          dec(store.FormatDecimal(t.LastPrice)),
+		OpenPrice:          dec(store.FormatDecimal(t.OpenPrice)),
+		HighPrice:          dec(store.FormatDecimal(t.HighPrice)),
+		LowPrice:           dec(store.FormatDecimal(t.LowPrice)),
+		Volume:             dec(store.FormatDecimal(t.Volume)),
+		QuoteVolume:        dec(store.FormatDecimal(t.QuoteVolume)),
+		PriceChangePercent: dec(store.FormatPercent(t.PriceChangePercent)),
 		Timestamp:          millisToTimestamp(t.UpdatedAtMs),
 	}
 }

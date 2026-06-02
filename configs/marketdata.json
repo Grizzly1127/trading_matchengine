@@ -14,7 +14,8 @@
   "publish": {
     "depth_interval_ms": 100,
     "depth_limit": 20,
-    "ticker_all_interval_ms": 500,
+    "ticker_all_interval_ms": 100,
+    "ticker_all_heartbeat_sec": 60,
     "ticker_all_quote_assets": ["USDT"]
   },
   "redis": {

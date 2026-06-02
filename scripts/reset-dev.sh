@@ -125,9 +125,15 @@ stop_services() {
   fi
 }
 
-clean_local_files() {
-  log ">>> 清理本地 WAL / 快照 / PID"
+# 删除撮合引擎 WAL / 快照（与手动 rm -rf data/wal data/snapshots 等价）。
+clean_matching_wal() {
+  log ">>> 删除 Matching WAL / 快照: rm -rf data/wal data/snapshots"
   rm -rf "$ROOT/data/wal" "$ROOT/data/snapshots"
+}
+
+clean_local_files() {
+  log ">>> 清理本地数据目录 / PID"
+  clean_matching_wal
   mkdir -p "$ROOT/data" "$ROOT/run" "$ROOT/logs"
   rm -f "$ROOT"/run/*.pid
 
@@ -208,7 +214,8 @@ redis_host() {
   if [[ "$host" == "$port" ]]; then
     port=6379
   fi
-  printf '%s %s' "$host" "$port"
+  # 必须带换行：否则 `read` 读到 EOF 会返回非零，在 set -e 下会让脚本在 reset_kafka 之前提前退出
+  printf '%s %s\n' "$host" "$port"
 }
 
 reset_redis() {
@@ -217,8 +224,10 @@ reset_redis() {
   read -r host port < <(redis_host)
 
   if command -v redis-cli >/dev/null 2>&1; then
-    redis-cli -h "$host" -p "$port" FLUSHALL
-    return 0
+    if redis-cli -h "$host" -p "$port" FLUSHALL 2>/dev/null; then
+      return 0
+    fi
+    log "本机 redis-cli 连接 $host:$port 失败，尝试 docker 容器"
   fi
 
   local redis_cid
@@ -319,8 +328,11 @@ print_next_steps() {
   3. 启动服务:
      ./scripts/dev.sh start --build
 
+  注意: 勿只清库而不跑本脚本；本脚本会自动 rm -rf data/wal data/snapshots。
+
   4. 联调:
      ./scripts/e2e-api.sh
+     # JWT: ./scripts/dev.sh start --build --auth --jwt && ./scripts/e2e-api.sh jwt
 
 EOF
 }
@@ -335,7 +347,10 @@ main() {
   reset_redis
   reset_kafka
   $DO_MIGRATE && run_migrate
-  $DO_KAFKA_TOPICS && run_kafka_topics
+  # 删除 topic 后必须重建；与 --kafka-topics 无关，避免 Outbox 写入失败。
+  run_kafka_topics
+  # 若上文在 Redis/Kafka 步骤失败退出，WAL 已在 clean_local_files 删过；此处再删一次以防 --no-stop 等边缘情况。
+  clean_matching_wal
   print_next_steps
 }
 

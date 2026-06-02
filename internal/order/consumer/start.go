@@ -18,6 +18,19 @@ type TopicConsumerConfig struct {
 	StartOffset int64
 }
 
+type loggingProcessor struct {
+	log   zerolog.Logger
+	inner Processor
+}
+
+func (p *loggingProcessor) Process(ctx context.Context, msg kafka.Message) error {
+	err := p.inner.Process(ctx, msg)
+	if err != nil && StaleEventError(err) {
+		p.log.Warn().Err(err).Int64("offset", msg.Offset).Msg("skip stale kafka event")
+	}
+	return err
+}
+
 // RunTopic 创建 reader 并阻塞消费直至 ctx 取消或出错。
 func RunTopic(ctx context.Context, log zerolog.Logger, cfg TopicConsumerConfig, h Processor) error {
 	reader, err := kafka.NewCommandReader(kafka.ReaderConfig{
@@ -39,7 +52,7 @@ func RunTopic(ctx context.Context, log zerolog.Logger, cfg TopicConsumerConfig, 
 		Int64("start_offset", cfg.StartOffset).
 		Msg("kafka consumer starting")
 
-	if err := Run(ctx, reader, h); err != nil {
+	if err := Run(ctx, reader, &loggingProcessor{log: log, inner: h}); err != nil {
 		return fmt.Errorf("consumer %s: %w", cfg.Topic, err)
 	}
 	return nil

@@ -1,13 +1,29 @@
 {
   "grpc_listen": ":50051",
+  "metrics_listen": ":9104",
   "database_url": "postgres://trading:trading@localhost:5432/trading?sslmode=disable",
   "migrate_on_start": true,
   "default_symbol": "BTC-USDT",
+  "symbols_file": "configs/symbols.json",
+  "matching": {
+    "enabled": true,
+    "grpc_addr": "localhost:50061",
+    "dial_timeout_seconds": 3
+  },
   "marketdata": {
     "grpc_addr": "localhost:50052",
     "dial_timeout_seconds": 3,
     "request_timeout_seconds": 1,
     "slippage_buffer": 0.005
+  },
+  "redis": {
+    "addr": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
+  "idempotency": {
+    "enabled": true,
+    "ttl_hours": 24
   },
   "kafka": {
     "brokers": ["localhost:9092"],

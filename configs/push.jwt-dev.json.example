@@ -1,0 +1,22 @@
+{
+  "http_listen": ":8081",
+  "auth": {
+    "mode": "jwt",
+    "jwt": {
+      "audience": ["trading-gateway", "trading-push"],
+      "issuers": [
+        {
+          "issuer": "trading-matchengine-dev",
+          "hs256_secret_file": "configs/auth-dev-hs256.secret"
+        }
+      ]
+    }
+  },
+  "tls": { "enabled": false },
+  "redis": {
+    "addr": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
+  "log": { "level": "info", "dev": true }
+}

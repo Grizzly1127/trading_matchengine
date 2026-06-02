@@ -17,9 +17,13 @@ type fakeMatchStore struct {
 	applied []repository.MatchEventApply
 }
 
-func (f *fakeMatchStore) ApplyMatchEvent(_ context.Context, in repository.MatchEventApply) error {
+func (f *fakeMatchStore) ApplyMatchEvent(_ context.Context, in repository.MatchEventApply) (bool, error) {
 	f.applied = append(f.applied, in)
-	return nil
+	return true, nil
+}
+
+func (f *fakeMatchStore) GetOrderByID(_ context.Context, orderID uint64) (*repository.Order, error) {
+	return &repository.Order{ID: orderID, UserID: 1, Symbol: "BTC-USDT", Status: "ACCEPTED", Quantity: "1", FilledQuantity: "0"}, nil
 }
 
 func TestMatchHandler_Process(t *testing.T) {

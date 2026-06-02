@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/presence"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/symbol"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/snapshot"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/Grizzly1127/trading_matchengine/pkg/wal"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
@@ -21,9 +24,11 @@ const defaultSnapshotEvery = 10000
 
 // Config 持久化撮合引擎配置。
 type Config struct {
-	ShardID       string
-	DataDir       string
-	SnapshotEvery uint64 // 每 N 条命令触发快照；0 表示默认 10000
+	ShardID          string
+	DataDir          string
+	SnapshotEvery    uint64 // 每 N 条命令触发快照；0 表示默认 10000
+	SymbolRegistry   *symbolrules.Registry
+	Metrics          *metrics.Metrics
 }
 
 // Engine 持久化分片：先写 WAL 再改内存，支持快照与重启恢复。
@@ -77,6 +82,7 @@ func Open(cfg Config) (*Engine, error) {
 		manifest: filepath.Join(snapRoot, "manifest.pb"),
 		seen:     make(map[uint64]struct{}),
 	}
+	symbol.RegisterRegistry(e.shard, cfg.SymbolRegistry)
 	if err := e.recover(); err != nil {
 		_ = e.Close()
 		return nil, err
@@ -158,6 +164,59 @@ func (e *Engine) Close() error {
 	return e.wal.Close()
 }
 
+// IsSymbolReadOnly 交易对是否因对账失败处于只读拒单。
+func (e *Engine) IsSymbolReadOnly(symbol string) bool {
+	if e == nil || e.shard == nil {
+		return false
+	}
+	return e.shard.IsReadOnly(symbol)
+}
+
+// SetSymbolReadOnly 将交易对设为只读拒单。
+func (e *Engine) SetSymbolReadOnly(symbol, reason string) {
+	if e == nil || e.shard == nil {
+		return
+	}
+	e.shard.SetReadOnly(symbol, reason)
+}
+
+// ActiveOrderIDs 返回 symbol 盘口活跃订单 ID。
+func (e *Engine) ActiveOrderIDs(symbol string) []uint64 {
+	if e == nil || e.shard == nil {
+		return nil
+	}
+	se, ok := e.shard.Get(symbol)
+	if !ok || se == nil || se.OrderBook == nil {
+		return nil
+	}
+	active := se.OrderBook.ActiveOrders()
+	out := make([]uint64, 0, len(active))
+	for id := range active {
+		out = append(out, id)
+	}
+	return out
+}
+
+// LookupOrderPresence 查询订单在撮合内存中的存在性（§5.6 对账）。
+func (e *Engine) LookupOrderPresence(symbol string, orderID uint64) presence.Kind {
+	if e == nil || orderID == 0 || symbol == "" {
+		return presence.Unknown
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.seen[orderID]; !ok {
+		return presence.Unknown
+	}
+	se, ok := e.shard.Get(symbol)
+	if !ok || se == nil || se.OrderBook == nil {
+		return presence.KnownNotInOrderbook
+	}
+	if se.OrderBook.HasActiveOrder(orderID) {
+		return presence.InOrderbook
+	}
+	return presence.KnownNotInOrderbook
+}
+
 // ApplyNewOrder 先写 WAL 再撮合；重复 order_id 幂等跳过。
 func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade, error) {
 	if cmd == nil || cmd.GetOrder() == nil {
@@ -166,6 +225,11 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	symbolName := cmd.GetOrder().GetSymbol()
+	if e.shard.IsReadOnly(symbolName) {
+		return nil, engine.ErrSymbolReadOnly
+	}
 
 	orderID := cmd.GetOrder().GetOrderId()
 	if orderID == 0 {
@@ -181,8 +245,12 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 	}
 
 	seq := e.wal.LastSeq() + 1
+	walStart := time.Now()
 	if err := e.wal.Append(seq, wal.EventTypeNewOrder, payload); err != nil {
 		return nil, err
+	}
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.ObserveWalAppend(time.Since(walStart))
 	}
 
 	trades, err := e.applyNewOrder(cmd, seq)
@@ -190,6 +258,9 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 		return trades, err
 	}
 	e.recovered = seq
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.SetWalLastSeq(seq)
+	}
 	if err := e.maybeSnapshot(seq); err != nil {
 		return trades, err
 	}
@@ -214,14 +285,21 @@ func (e *Engine) ApplyCancel(cmd *matchingv1.CancelOrderCommand) error {
 	}
 
 	seq := e.wal.LastSeq() + 1
+	walStart := time.Now()
 	if err := e.wal.Append(seq, wal.EventTypeCancelOrder, payload); err != nil {
 		return err
+	}
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.ObserveWalAppend(time.Since(walStart))
 	}
 
 	if err := e.shard.Cancel(cmd.GetSymbol(), cmd.GetOrderId()); err != nil {
 		return err
 	}
 	e.recovered = seq
+	if e.cfg.Metrics != nil {
+		e.cfg.Metrics.SetWalLastSeq(seq)
+	}
 	return e.maybeSnapshot(seq)
 }
 

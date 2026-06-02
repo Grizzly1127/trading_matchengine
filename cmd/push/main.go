@@ -14,6 +14,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/push/hub"
 	"github.com/Grizzly1127/trading_matchengine/internal/push/server"
 	"github.com/Grizzly1127/trading_matchengine/internal/push/subscriber"
+	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	"github.com/go-chi/chi/v5"
@@ -51,6 +52,13 @@ func main() {
 	defer logRes.Close()
 	log := logRes.Logger
 
+	initCtx := context.Background()
+	verifier, err := cfg.NewVerifier(initCtx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("auth verifier")
+	}
+	defer verifier.Close()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -63,8 +71,8 @@ func main() {
 		log.Fatal().Err(err).Msg("redis ping failed")
 	}
 
-	h := hub.New()
-	ws := &server.WSServer{Hub: h, Redis: rdb, Token: cfg.Auth.StaticToken, Log: log}
+	h := hub.NewWithLimits(cfg.Limits)
+	ws := &server.WSServer{Hub: h, Redis: rdb, Verifier: verifier, Limits: cfg.Limits, Log: log}
 	sub := &subscriber.RedisFanout{Redis: rdb, Hub: h, Log: log.With().Str("component", "redis_subscriber").Logger()}
 	go func() {
 		if err := sub.Run(ctx); err != nil && ctx.Err() == nil {
@@ -72,6 +80,11 @@ func main() {
 			stop()
 		}
 	}()
+
+	tlsCfg, err := auth.ServerTLS(cfg.TLS)
+	if err != nil {
+		log.Fatal().Err(err).Msg("tls config")
+	}
 
 	router := chi.NewRouter()
 	router.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
@@ -81,10 +94,21 @@ func main() {
 		Addr:              cfg.HTTPListen,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
+		TLSConfig:         tlsCfg,
 	}
 	go func() {
-		log.Info().Str("http_listen", cfg.HTTPListen).Msg("push service ready")
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Info().
+			Str("http_listen", cfg.HTTPListen).
+			Str("auth_mode", cfg.Auth.Mode).
+			Bool("tls_enabled", cfg.TLS.Enabled).
+			Msg("push service ready")
+		var err error
+		if tlsCfg != nil {
+			err = httpServer.ListenAndServeTLS("", "")
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("http serve")
 			stop()
 		}

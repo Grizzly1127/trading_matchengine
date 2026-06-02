@@ -1,0 +1,37 @@
+{
+  "symbols": {
+    "BTC-USDT": {
+      "base_asset": "BTC",
+      "quote_asset": "USDT",
+      "price_precision": 2,
+      "quantity_precision": 6,
+      "min_quantity": "0.000001",
+      "min_notional": "5",
+      "status": "TRADING"
+    },
+    "ETH-USDT": {
+      "base_asset": "ETH",
+      "quote_asset": "USDT",
+      "price_precision": 2,
+      "quantity_precision": 6,
+      "min_quantity": "0.000001",
+      "min_notional": "5",
+      "status": "TRADING"
+    },
+    "SOL-USDT": {
+      "base_asset": "SOL",
+      "quote_asset": "USDT",
+      "price_precision": 2,
+      "quantity_precision": 6,
+      "min_quantity": "0.000001",
+      "min_notional": "5",
+      "status": "TRADING"
+    }
+  },
+  "assets": {
+    "BTC": { "precision": 8 },
+    "USDT": { "precision": 8 },
+    "ETH": { "precision": 8 },
+    "SOL": { "precision": 8 }
+  }
+}

@@ -66,5 +66,8 @@ var (
 // ErrOrderNotFound 表示订单不存在。
 var ErrOrderNotFound = errors.New("order not found")
 
+// ErrSkippableEvent 表示可跳过的陈旧/不兼容 Kafka 事件（如 reset 后残留消息）。
+var ErrSkippableEvent = errors.New("skippable kafka event")
+
 // ErrInsufficientBalance 表示余额不足。
 var ErrInsufficientBalance = errors.New("insufficient balance")

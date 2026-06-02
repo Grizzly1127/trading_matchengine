@@ -40,7 +40,8 @@ func Run(ctx context.Context, c kafka.Consumer, h *Handler) error {
 // StartOffset 根据 WAL 中已记录的 kafka offset 计算下一条消费位点。
 func StartOffset(resume uint64, hasResume bool) int64 {
 	if !hasResume {
-		return -1 // 从最新
+		// 空 WAL（含 reset-dev 后）：从最早消费，避免 topic 残留命令在「最新」策略下被跳过。
+		return 0
 	}
 	return int64(resume + 1)
 }

@@ -24,13 +24,18 @@ type SymbolState struct {
 
 	Ticker    TickerState
 	OrderBook OrderBookState
+	trades24h []tradeTick
 }
 
 type TickerState struct {
-	LastPrice   decimal.Decimal
-	Volume      decimal.Decimal
-	QuoteVolume decimal.Decimal
-	UpdatedAtMs int64
+	LastPrice          decimal.Decimal
+	OpenPrice          decimal.Decimal
+	HighPrice          decimal.Decimal
+	LowPrice           decimal.Decimal
+	Volume             decimal.Decimal
+	QuoteVolume        decimal.Decimal
+	PriceChangePercent decimal.Decimal
+	UpdatedAtMs        int64
 }
 
 type OrderBookState struct {
@@ -165,10 +170,7 @@ func (s *Store) ApplyTrade(symbol string, priceStr string, qtyStr string, update
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	st.Ticker.LastPrice = price
-	st.Ticker.Volume = st.Ticker.Volume.Add(qty)
-	st.Ticker.QuoteVolume = st.Ticker.QuoteVolume.Add(price.Mul(qty))
-	st.Ticker.UpdatedAtMs = updatedAtMs
+	st.applyTrade24h(price, qty, updatedAtMs)
 	return nil
 }
 
@@ -470,9 +472,17 @@ func computeTickerAllSnapshotID(quoteAsset string, items []TickerSnapshot) strin
 		b.WriteString(":")
 		b.WriteString(it.LastPrice.String())
 		b.WriteString(":")
+		b.WriteString(it.OpenPrice.String())
+		b.WriteString(":")
+		b.WriteString(it.HighPrice.String())
+		b.WriteString(":")
+		b.WriteString(it.LowPrice.String())
+		b.WriteString(":")
 		b.WriteString(it.Volume.String())
 		b.WriteString(":")
 		b.WriteString(it.QuoteVolume.String())
+		b.WriteString(":")
+		b.WriteString(it.PriceChangePercent.String())
 		b.WriteString(":")
 		b.WriteString(strconv.FormatInt(it.UpdatedAtMs, 10))
 		b.WriteString("|")

@@ -237,7 +237,78 @@ func (h *Orders) ListOrders(w http.ResponseWriter, r *http.Request) {
 	response.WriteOK(w, r, http.StatusOK, data)
 }
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+// ListTrades GET /v1/trades
+func (h *Orders) ListTrades(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r, 0)
+	if !ok {
+		return
+	}
+
+	q := r.URL.Query()
+	pageSize := 50
+	if limitStr := strings.TrimSpace(q.Get("limit")); limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 1 {
+			grpcerr.Write(w, r, grpcerr.BadRequest("limit must be a positive integer"))
+			return
+		}
+		if limit > 200 {
+			limit = 200
+		}
+		pageSize = limit
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	req := &orderv1.ListTradesRequest{
+		UserId:   userID,
+		Symbol:   strings.TrimSpace(q.Get("symbol")),
+		Page:     1,
+		PageSize: int32(pageSize),
+	}
+
+	if orderStr := strings.TrimSpace(q.Get("order_id")); orderStr != "" {
+		orderID, err := convert.ParseOrderID(orderStr)
+		if err != nil {
+			grpcerr.Write(w, r, grpcerr.BadRequest(err.Error()))
+			return
+		}
+		req.OrderId = orderID
+	}
+
+	if start := strings.TrimSpace(q.Get("start_time")); start != "" {
+		t, err := convert.ParseTimeQuery(start)
+		if err != nil {
+			grpcerr.Write(w, r, grpcerr.BadRequest("start_time: "+err.Error()))
+			return
+		}
+		req.CreatedAtFrom = timestamppb.New(t)
+	}
+	if end := strings.TrimSpace(q.Get("end_time")); end != "" {
+		t, err := convert.ParseTimeQuery(end)
+		if err != nil {
+			grpcerr.Write(w, r, grpcerr.BadRequest("end_time: "+err.Error()))
+			return
+		}
+		req.CreatedAtTo = timestamppb.New(t)
+	}
+
+	resp, err := h.Orders.ListTrades(r.Context(), req)
+	if err != nil {
+		grpcerr.Write(w, r, err)
+		return
+	}
+
+	items := convert.TradesFromPB(resp.GetTrades())
+	data := convert.TradeListData{
+		Items:   items,
+		HasMore: len(items) >= pageSize,
+	}
+	response.WriteOK(w, r, http.StatusOK, data)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxOrderBodyBytes)
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)

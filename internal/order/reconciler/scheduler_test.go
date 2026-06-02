@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/rs/zerolog"
 )
 
@@ -16,8 +17,12 @@ type fakeReconcileStore struct {
 	resent       []uint64
 }
 
-func (f *fakeReconcileStore) FindStalePendingForReject(_ context.Context, _ time.Time, _ int) ([]uint64, error) {
-	return f.pendingIDs, nil
+func (f *fakeReconcileStore) FindStalePendingForReject(_ context.Context, _ time.Time, _ int) ([]repository.StalePendingOrder, error) {
+	out := make([]repository.StalePendingOrder, 0, len(f.pendingIDs))
+	for _, id := range f.pendingIDs {
+		out = append(out, repository.StalePendingOrder{ID: id, Symbol: "BTC-USDT"})
+	}
+	return out, nil
 }
 
 func (f *fakeReconcileStore) RejectStalePending(_ context.Context, orderID uint64, _ string) (bool, error) {

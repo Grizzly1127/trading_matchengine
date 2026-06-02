@@ -1,6 +1,7 @@
 package symbol
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
@@ -49,7 +50,14 @@ func (s *Shard) Match(taker engine.Order, commandSeq uint64) ([]engine.Trade, er
 	if taker.Symbol == "" {
 		return nil, engine.ErrSymbolRequired
 	}
-	return s.Symbol(taker.Symbol).Match(taker, commandSeq)
+	if s.IsReadOnly(taker.Symbol) {
+		return nil, engine.ErrSymbolReadOnly
+	}
+	se, ok := s.Get(taker.Symbol)
+	if !ok {
+		return nil, fmt.Errorf("unknown symbol %q", taker.Symbol)
+	}
+	return se.Match(taker, commandSeq)
 }
 
 // Cancel 按 symbol 撤单。
@@ -70,4 +78,39 @@ func (s *Shard) Symbols() []string {
 		out = append(out, sym)
 	}
 	return out
+}
+
+// SetReadOnly 将交易对设为只读拒单。
+func (s *Shard) SetReadOnly(symbol, reason string) {
+	if symbol == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	se := s.symbols[symbol]
+	if se == nil {
+		se = NewSymbolEngine(symbol, "", "")
+		s.symbols[symbol] = se
+	}
+	se.ReadOnly = true
+	se.ReadOnlyReason = reason
+}
+
+// IsReadOnly 是否处于只读拒单状态。
+func (s *Shard) IsReadOnly(symbol string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	se, ok := s.symbols[symbol]
+	return ok && se != nil && se.ReadOnly
+}
+
+// ReadOnlyReason 返回只读原因；未只读时为空。
+func (s *Shard) ReadOnlyReason(symbol string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	se, ok := s.symbols[symbol]
+	if !ok || se == nil || !se.ReadOnly {
+		return ""
+	}
+	return se.ReadOnlyReason
 }

@@ -62,8 +62,8 @@ flowchart LR
 | `kline:open:{symbol}:{interval}` | ✅ | JSON | `interval + 1min` | Kline Service | Kline 启动恢复、Push（若订阅） |
 | `kline:pending:close` | ✅ | LIST（JSON 元素） | 无 | Kline Service | Kline Worker 消费 |
 | `svc:heartbeat:{service}` | ✅ | 毫秒时间戳字符串 | 10s | Market Data（预留 API） | 监控/探活 |
-| `idempotent:order:{client_order_id}` | 📋 规划 | — | 24h（架构） | — | Order 幂等（当前用 PostgreSQL） |
-| `index:{symbol}` | 📋 规划 | — | 10s（架构） | Index Price | Gateway / 风控 |
+| `idempotent:order:{user_id}:{client_order_id}` | ✅ | order_id 十进制字符串 | 24h（可配置） | Order Service | PlaceOrder 幂等热路径；权威仍在 PG |
+| `index:{symbol}` | ✅ | JSON | 10s | Index Price | Push WS、gRPC |
 
 `{symbol}` 示例：`BTC-USDT`。`{interval}` 示例：`1m`、`1s`、`1h`（见 `pkg/kline/interval`）。  
 `{quote}` 示例：`USDT`、`ALL`。
@@ -76,11 +76,10 @@ flowchart LR
 | `depth:{symbol}` | ✅ | 深度 snapshot 或 delta JSON | Market Data | Push → WS |
 | `ticker@all:{quote}` | ✅ | 同 `ticker:all:{quote}` Key | Market Data | Push → WS |
 | `kline:{symbol}:{interval}` | ✅ | K 线 bar JSON | Kline Service | Push → WS |
-| `trade:{symbol}` | 📋 预留 | — | （未实现） | Push 已 PSubscribe |
-| `index:{symbol}` | 📋 规划 | — | Index Price | Push 已 PSubscribe |
-| `index` | 📋 规划 | — | Index Price | Push 已 PSubscribe |
+| `trade:{symbol}` | ✅ | JSON | Market Data | Push 已 PSubscribe |
+| `index:{symbol}` | ✅ | 同 Key JSON | Index Price | Push → WS |
 
-Push 使用 **模式订阅**（`PSubscribe`）：`depth:*`、`ticker:*`、`trade:*`、`kline:*`、`index:*`、`ticker@all:*`（见 `internal/push/subscriber/redis_subscriber.go`）。
+Push 使用 **模式订阅**（`PSubscribe`）：`depth:*`、`ticker:*`、`trade:*`、`kline:*`、`index:*`、`ticker@all:*`、`order:*`（见 `internal/push/subscriber/redis_subscriber.go`）。
 
 ---
 
@@ -134,8 +133,12 @@ Pub/Sub **不保证可靠投递**；客户端应：
 {
   "symbol": "BTC-USDT",
   "last_price": "65000.50",
+  "open_price": "64000",
+  "high_price": "66000",
+  "low_price": "63500",
   "volume": "1.234",
   "quote_volume": "80234.56",
+  "price_change_percent": "1.56",
   "ts": 1716192000123
 }
 ```
@@ -143,8 +146,12 @@ Pub/Sub **不保证可靠投递**；客户端应：
 | 字段 | 说明 |
 |------|------|
 | `last_price` | 最新成交价 |
-| `volume` | 24h 成交量（base，内存聚合） |
+| `open_price` | 24h 开盘价（窗口内首笔成交价） |
+| `high_price` | 24h 最高价 |
+| `low_price` | 24h 最低价 |
+| `volume` | 24h 成交量（base，滚动窗口内聚合） |
 | `quote_volume` | 24h 成交额（quote） |
+| `price_change_percent` | 24h 涨跌幅 `(last-open)/open*100`，保留 2 位小数 |
 | `ts` | 更新时间（Unix ms） |
 
 ### 4.3 生产与消费
@@ -339,7 +346,7 @@ Push 服务（`cmd/push`，默认 `:8081/v1/ws`）不直接参与聚合，只做
 | `ticker@all:USDT` | `ticker:all:USDT` |
 | `ticker@all` | `ticker:all:ALL` |
 | `kline:BTC-USDT:1m` | **无**（当前未映射 GET；仅靠后续 Pub/Sub） |
-| `trade:*` / `index:*` | **无**（发布方未实现） |
+| `order:{user_id}` | Order Service（match.events 落库后） |
 
 实现：`internal/push/server/ws.go` → `snapshotKey()`。
 
@@ -359,10 +366,10 @@ Market Data / Kline
 
 | 能力 | Key / 频道 | 说明 |
 |------|------------|------|
-| 下单幂等锁 | `idempotent:order:{client_order_id}` | 当前 Order 使用 PG 表 `client_order_idempotency` |
+| ~~下单幂等锁~~ | `idempotent:order:{user_id}:{client_order_id}` | **已实现**（Redis 缓存 + PG `client_order_idempotency` 双轨） |
 | 指数价格 | `index:{symbol}`、`index:*` | Index Price Service |
-| 公开成交推送 | `trade:{symbol}` | Push 已订阅，无生产者 |
-| 用户订单推送 | WS `order` | 需 Order 消费 match 后发 Redis（未实现） |
+| 公开成交推送 | `trade:{symbol}` | Market Data `PublishTrade` |
+| 用户订单推送 | WS `order` / Redis `order:{user_id}` | Order `PublishOrderUpdate`（match.events 落库后） |
 
 ---
 

@@ -14,7 +14,7 @@ import (
 // Server 实现 order.v1.OrderService gRPC。
 type OrderServer struct {
 	orderv1.UnimplementedOrderServiceServer
-	Svc *service.Service
+	Svc *service.OrderService
 }
 
 // PlaceOrder 创建订单。
@@ -42,6 +42,13 @@ func (s *OrderServer) GetOrder(ctx context.Context, req *orderv1.GetOrderRequest
 func (s *OrderServer) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest) (*orderv1.ListOrdersResponse, error) {
 	return invokeOrder(s, req, func() (*orderv1.ListOrdersResponse, error) {
 		return s.Svc.ListOrders(ctx, req)
+	})
+}
+
+// ListTrades 查询成交列表。
+func (s *OrderServer) ListTrades(ctx context.Context, req *orderv1.ListTradesRequest) (*orderv1.ListTradesResponse, error) {
+	return invokeOrder(s, req, func() (*orderv1.ListTradesResponse, error) {
+		return s.Svc.ListTrades(ctx, req)
 	})
 }
 

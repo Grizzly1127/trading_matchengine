@@ -5,22 +5,27 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/aggregator"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/config"
 	klineconsumer "github.com/Grizzly1127/trading_matchengine/internal/kline/consumer"
+	klmetrics "github.com/Grizzly1127/trading_matchengine/internal/kline/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/recovery"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/repository"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/service"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/worker"
 	"github.com/Grizzly1127/trading_matchengine/internal/marketdata/consumer"
+	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 )
@@ -86,8 +91,21 @@ func main() {
 	}
 
 	pub := publisher.NewRedisPublisher(rdb)
+	m := &klmetrics.Counters{}
+	klmetrics.RegisterPrometheus(m)
+
+	var kafkaPub *publisher.KafkaPublisher
+	var kafkaWriter *kafka.EventWriter
+	if cfg.Kafka.ProducerEnabled {
+		kafkaWriter = kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
+		defer func() { _ = kafkaWriter.Close() }()
+		kafkaPub = publisher.NewKafkaPublisher(kafkaWriter, cfg.Kafka.KlineRawTopic)
+	}
+
 	agg := aggregator.NewAggregator()
 	closeWorker := worker.New(repo, pub, log.With().Str("component", "close_worker").Logger(), cfg.ClosedQueueSize)
+	closeWorker.Kafka = kafkaPub
+	closeWorker.Metrics = m
 
 	agg.SetOnClose(func(ev aggregator.ClosedEvent) {
 		closeWorker.HandleClose(ctx, ev)
@@ -103,9 +121,11 @@ func main() {
 	grpcServer := grpc.NewServer()
 	klinev1.RegisterKlineServiceServer(grpcServer, service.NewServer(repo, agg))
 	go startGRPC(ctx, log, cfg.GRPCListen, grpcServer, errCh)
+	go startMetricsHTTP(ctx, log, cfg.MetricsListen, errCh)
+	startMetricsLogger(ctx, log.With().Str("component", "metrics").Logger(), m)
 
 	if cfg.Kafka.ConsumerEnabled {
-		startTradeConsumer(ctx, log, cfg, agg, pub)
+		startTradeConsumer(ctx, log, cfg, agg, pub, m)
 	}
 
 	select {
@@ -135,7 +155,48 @@ func startGRPC(ctx context.Context, log zerolog.Logger, addr string, srv *grpc.S
 	}
 }
 
-func startTradeConsumer(ctx context.Context, log zerolog.Logger, cfg config.Config, agg *aggregator.Aggregator, pub *publisher.RedisPublisher) {
+func startMetricsHTTP(ctx context.Context, log zerolog.Logger, addr string, errCh chan<- error) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		_ = srv.Shutdown(context.Background())
+	}()
+	log.Info().Str("listen", addr).Msg("kline metrics listening")
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		errCh <- fmt.Errorf("metrics serve: %w", err)
+	}
+}
+
+func startMetricsLogger(ctx context.Context, log zerolog.Logger, m *klmetrics.Counters) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s := m.Snapshot()
+				log.Info().
+					Uint64("trade_events", s.TradeEvents).
+					Uint64("open_bar_updates", s.OpenBarUpdates).
+					Uint64("closed_bars", s.ClosedBarsPersisted).
+					Uint64("kline_raw_published", s.KlineRawPublished).
+					Uint64("redis_publish_errors", s.RedisPublishErrors).
+					Uint64("kafka_publish_errors", s.KafkaPublishErrors).
+					Msg("kline metrics")
+			}
+		}
+	}()
+}
+
+func startTradeConsumer(ctx context.Context, log zerolog.Logger, cfg config.Config, agg *aggregator.Aggregator, pub *publisher.RedisPublisher, m *klmetrics.Counters) {
 	base := consumer.TopicConsumerConfig{
 		Brokers:     cfg.Kafka.Brokers,
 		GroupID:     cfg.Kafka.GroupID,
@@ -149,6 +210,7 @@ func startTradeConsumer(ctx context.Context, log zerolog.Logger, cfg config.Conf
 		if err := consumer.RunTopic(ctx, tradeLog, tradeCfg, &klineconsumer.TradeHandler{
 			Aggregator: agg,
 			Publisher:  pub,
+			Metrics:    m,
 		}); err != nil && ctx.Err() == nil {
 			tradeLog.Error().Err(err).Msg("kline trade consumer stopped")
 		}

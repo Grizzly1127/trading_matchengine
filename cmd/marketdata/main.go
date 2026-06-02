@@ -16,6 +16,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/marketdata/handler"
 	"github.com/Grizzly1127/trading_matchengine/internal/marketdata/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/marketdata/publisher"
+	"github.com/Grizzly1127/trading_matchengine/internal/marketdata/tickerallpub"
 	"github.com/Grizzly1127/trading_matchengine/internal/marketdata/store"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
@@ -127,29 +128,40 @@ func startEventConsumers(ctx context.Context, log zerolog.Logger, cfg config.Con
 	}
 
 	matchLog := log.With().Str("component", "match_consumer").Logger()
-	go func() {
+	go runMarketdataConsumerLoop(ctx, matchLog, func() error {
 		matchCfg := base
 		matchCfg.Topic = cfg.Kafka.MatchTopic
-		if err := consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{
+		return consumer.RunTopic(ctx, matchLog, matchCfg, &consumer.MatchHandler{
 			Store:   st,
 			Metrics: m,
-		}); err != nil && ctx.Err() == nil {
-			matchLog.Error().Err(err).Msg("match consumer stopped")
-		}
-	}()
+		})
+	})
 
 	tradeLog := log.With().Str("component", "trade_consumer").Logger()
-	go func() {
+	go runMarketdataConsumerLoop(ctx, tradeLog, func() error {
 		tradeCfg := base
 		tradeCfg.Topic = cfg.Kafka.TradeTopic
-		if err := consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{
+		return consumer.RunTopic(ctx, tradeLog, tradeCfg, &consumer.TradeHandler{
 			Store:     st,
 			Publisher: pub,
 			Metrics:   m,
-		}); err != nil && ctx.Err() == nil {
-			tradeLog.Error().Err(err).Msg("trade consumer stopped")
+		})
+	})
+}
+
+func runMarketdataConsumerLoop(ctx context.Context, log zerolog.Logger, run func() error) {
+	for {
+		if err := run(); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("kafka consumer stopped, retry in 1s")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
 		}
-	}()
+		return
+	}
 }
 
 func startDepthPublisher(ctx context.Context, log zerolog.Logger, cfg config.Config, st *store.Store, pub *publisher.RedisPublisher, m *metrics.Counters) {
@@ -201,26 +213,27 @@ func startDepthPublisher(ctx context.Context, log zerolog.Logger, cfg config.Con
 
 func startTickerAllPublisher(ctx context.Context, log zerolog.Logger, cfg config.Config, st *store.Store, pub *publisher.RedisPublisher, m *metrics.Counters) {
 	interval := time.Duration(cfg.Publish.TickerAllIntervalMs) * time.Millisecond
-	quoteAssets := append([]string(nil), cfg.Publish.TickerAllQuoteAssets...)
+	hbSec := cfg.Publish.TickerAllHeartbeatSec
+	if hbSec <= 0 {
+		hbSec = 60
+	}
+	p := &tickerallpub.Publisher{
+		Store:          st,
+		Redis:          pub,
+		Interval:       interval,
+		HeartbeatEvery: time.Duration(hbSec) * time.Second,
+		QuoteAssets:    append([]string(nil), cfg.Publish.TickerAllQuoteAssets...),
+		OnPublished: func() {
+			m.TickerAllPublished.Add(1)
+		},
+	}
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				for _, quote := range quoteAssets {
-					snap := st.BuildTickerAllSnapshot(quote)
-					if err := pub.PublishTickerAll(ctx, snap); err != nil {
-						m.RedisPublishErrors.Add(1)
-						log.Error().Err(err).Str("quote_asset", quote).Msg("publish ticker all failed")
-					} else {
-						m.TickerAllPublished.Add(1)
-					}
-				}
-			}
-		}
+		log.Info().
+			Int("interval_ms", cfg.Publish.TickerAllIntervalMs).
+			Int("heartbeat_sec", hbSec).
+			Strs("quote_assets", p.QuoteAssets).
+			Msg("ticker@all publisher started")
+		p.Run(ctx)
 	}()
 }
 

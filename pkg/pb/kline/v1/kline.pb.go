@@ -243,6 +243,123 @@ func (x *Kline) GetIsClosed() bool {
 	return false
 }
 
+// KlineClosedEvent 发布至 Kafka topic kline.raw（bar 闭合通知）。
+type KlineClosedEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Symbol        string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Interval      string                 `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	OpenTimeMs    int64                  `protobuf:"varint,3,opt,name=open_time_ms,json=openTimeMs,proto3" json:"open_time_ms,omitempty"`
+	CloseTimeMs   int64                  `protobuf:"varint,4,opt,name=close_time_ms,json=closeTimeMs,proto3" json:"close_time_ms,omitempty"`
+	Open          *v1.Decimal            `protobuf:"bytes,5,opt,name=open,proto3" json:"open,omitempty"`
+	High          *v1.Decimal            `protobuf:"bytes,6,opt,name=high,proto3" json:"high,omitempty"`
+	Low           *v1.Decimal            `protobuf:"bytes,7,opt,name=low,proto3" json:"low,omitempty"`
+	Close         *v1.Decimal            `protobuf:"bytes,8,opt,name=close,proto3" json:"close,omitempty"`
+	Volume        *v1.Decimal            `protobuf:"bytes,9,opt,name=volume,proto3" json:"volume,omitempty"`
+	TsMs          int64                  `protobuf:"varint,10,opt,name=ts_ms,json=tsMs,proto3" json:"ts_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KlineClosedEvent) Reset() {
+	*x = KlineClosedEvent{}
+	mi := &file_kline_v1_kline_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KlineClosedEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KlineClosedEvent) ProtoMessage() {}
+
+func (x *KlineClosedEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_kline_v1_kline_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KlineClosedEvent.ProtoReflect.Descriptor instead.
+func (*KlineClosedEvent) Descriptor() ([]byte, []int) {
+	return file_kline_v1_kline_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *KlineClosedEvent) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *KlineClosedEvent) GetInterval() string {
+	if x != nil {
+		return x.Interval
+	}
+	return ""
+}
+
+func (x *KlineClosedEvent) GetOpenTimeMs() int64 {
+	if x != nil {
+		return x.OpenTimeMs
+	}
+	return 0
+}
+
+func (x *KlineClosedEvent) GetCloseTimeMs() int64 {
+	if x != nil {
+		return x.CloseTimeMs
+	}
+	return 0
+}
+
+func (x *KlineClosedEvent) GetOpen() *v1.Decimal {
+	if x != nil {
+		return x.Open
+	}
+	return nil
+}
+
+func (x *KlineClosedEvent) GetHigh() *v1.Decimal {
+	if x != nil {
+		return x.High
+	}
+	return nil
+}
+
+func (x *KlineClosedEvent) GetLow() *v1.Decimal {
+	if x != nil {
+		return x.Low
+	}
+	return nil
+}
+
+func (x *KlineClosedEvent) GetClose() *v1.Decimal {
+	if x != nil {
+		return x.Close
+	}
+	return nil
+}
+
+func (x *KlineClosedEvent) GetVolume() *v1.Decimal {
+	if x != nil {
+		return x.Volume
+	}
+	return nil
+}
+
+func (x *KlineClosedEvent) GetTsMs() int64 {
+	if x != nil {
+		return x.TsMs
+	}
+	return 0
+}
+
 var File_kline_v1_kline_proto protoreflect.FileDescriptor
 
 const file_kline_v1_kline_proto_rawDesc = "" +
@@ -266,7 +383,20 @@ const file_kline_v1_kline_proto_rawDesc = "" +
 	"\x03low\x18\x05 \x01(\v2\x12.common.v1.DecimalR\x03low\x12(\n" +
 	"\x05close\x18\x06 \x01(\v2\x12.common.v1.DecimalR\x05close\x12*\n" +
 	"\x06volume\x18\a \x01(\v2\x12.common.v1.DecimalR\x06volume\x12\x1b\n" +
-	"\tis_closed\x18\b \x01(\bR\bisClosed2T\n" +
+	"\tis_closed\x18\b \x01(\bR\bisClosed\"\xed\x02\n" +
+	"\x10KlineClosedEvent\x12\x16\n" +
+	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\binterval\x18\x02 \x01(\tR\binterval\x12 \n" +
+	"\fopen_time_ms\x18\x03 \x01(\x03R\n" +
+	"openTimeMs\x12\"\n" +
+	"\rclose_time_ms\x18\x04 \x01(\x03R\vcloseTimeMs\x12&\n" +
+	"\x04open\x18\x05 \x01(\v2\x12.common.v1.DecimalR\x04open\x12&\n" +
+	"\x04high\x18\x06 \x01(\v2\x12.common.v1.DecimalR\x04high\x12$\n" +
+	"\x03low\x18\a \x01(\v2\x12.common.v1.DecimalR\x03low\x12(\n" +
+	"\x05close\x18\b \x01(\v2\x12.common.v1.DecimalR\x05close\x12*\n" +
+	"\x06volume\x18\t \x01(\v2\x12.common.v1.DecimalR\x06volume\x12\x13\n" +
+	"\x05ts_ms\x18\n" +
+	" \x01(\x03R\x04tsMs2T\n" +
 	"\fKlineService\x12D\n" +
 	"\tGetKlines\x12\x1a.kline.v1.GetKlinesRequest\x1a\x1b.kline.v1.GetKlinesResponseBDZBgithub.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1;klinev1b\x06proto3"
 
@@ -282,32 +412,38 @@ func file_kline_v1_kline_proto_rawDescGZIP() []byte {
 	return file_kline_v1_kline_proto_rawDescData
 }
 
-var file_kline_v1_kline_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_kline_v1_kline_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_kline_v1_kline_proto_goTypes = []any{
 	(*GetKlinesRequest)(nil),      // 0: kline.v1.GetKlinesRequest
 	(*GetKlinesResponse)(nil),     // 1: kline.v1.GetKlinesResponse
 	(*Kline)(nil),                 // 2: kline.v1.Kline
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
-	(*v1.Decimal)(nil),            // 4: common.v1.Decimal
+	(*KlineClosedEvent)(nil),      // 3: kline.v1.KlineClosedEvent
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
+	(*v1.Decimal)(nil),            // 5: common.v1.Decimal
 }
 var file_kline_v1_kline_proto_depIdxs = []int32{
-	3,  // 0: kline.v1.GetKlinesRequest.start_time:type_name -> google.protobuf.Timestamp
-	3,  // 1: kline.v1.GetKlinesRequest.end_time:type_name -> google.protobuf.Timestamp
+	4,  // 0: kline.v1.GetKlinesRequest.start_time:type_name -> google.protobuf.Timestamp
+	4,  // 1: kline.v1.GetKlinesRequest.end_time:type_name -> google.protobuf.Timestamp
 	2,  // 2: kline.v1.GetKlinesResponse.klines:type_name -> kline.v1.Kline
-	3,  // 3: kline.v1.Kline.open_time:type_name -> google.protobuf.Timestamp
-	3,  // 4: kline.v1.Kline.close_time:type_name -> google.protobuf.Timestamp
-	4,  // 5: kline.v1.Kline.open:type_name -> common.v1.Decimal
-	4,  // 6: kline.v1.Kline.high:type_name -> common.v1.Decimal
-	4,  // 7: kline.v1.Kline.low:type_name -> common.v1.Decimal
-	4,  // 8: kline.v1.Kline.close:type_name -> common.v1.Decimal
-	4,  // 9: kline.v1.Kline.volume:type_name -> common.v1.Decimal
-	0,  // 10: kline.v1.KlineService.GetKlines:input_type -> kline.v1.GetKlinesRequest
-	1,  // 11: kline.v1.KlineService.GetKlines:output_type -> kline.v1.GetKlinesResponse
-	11, // [11:12] is the sub-list for method output_type
-	10, // [10:11] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	4,  // 3: kline.v1.Kline.open_time:type_name -> google.protobuf.Timestamp
+	4,  // 4: kline.v1.Kline.close_time:type_name -> google.protobuf.Timestamp
+	5,  // 5: kline.v1.Kline.open:type_name -> common.v1.Decimal
+	5,  // 6: kline.v1.Kline.high:type_name -> common.v1.Decimal
+	5,  // 7: kline.v1.Kline.low:type_name -> common.v1.Decimal
+	5,  // 8: kline.v1.Kline.close:type_name -> common.v1.Decimal
+	5,  // 9: kline.v1.Kline.volume:type_name -> common.v1.Decimal
+	5,  // 10: kline.v1.KlineClosedEvent.open:type_name -> common.v1.Decimal
+	5,  // 11: kline.v1.KlineClosedEvent.high:type_name -> common.v1.Decimal
+	5,  // 12: kline.v1.KlineClosedEvent.low:type_name -> common.v1.Decimal
+	5,  // 13: kline.v1.KlineClosedEvent.close:type_name -> common.v1.Decimal
+	5,  // 14: kline.v1.KlineClosedEvent.volume:type_name -> common.v1.Decimal
+	0,  // 15: kline.v1.KlineService.GetKlines:input_type -> kline.v1.GetKlinesRequest
+	1,  // 16: kline.v1.KlineService.GetKlines:output_type -> kline.v1.GetKlinesResponse
+	16, // [16:17] is the sub-list for method output_type
+	15, // [15:16] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_kline_v1_kline_proto_init() }
@@ -321,7 +457,7 @@ func file_kline_v1_kline_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kline_v1_kline_proto_rawDesc), len(file_kline_v1_kline_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1,7 +1,30 @@
 {
   "http_listen": ":8081",
   "auth": {
-    "static_token": "dev-token-change-me"
+    "mode": "static",
+    "static_token": "dev-token-change-me",
+    "static_scopes": [
+      "orders:read",
+      "orders:write",
+      "balances:read",
+      "balances:admin",
+      "market:read",
+      "push:connect"
+    ],
+    "market_maker_static_token": "dev-mm-token-change-me",
+    "market_maker_static_scopes": [
+      "market:read",
+      "push:connect",
+      "push:ticker_all"
+    ]
+  },
+  "tls": {
+    "enabled": false
+  },
+  "limits": {
+    "retail_max_connections": 5,
+    "retail_max_symbols_per_connection": 50,
+    "market_maker_max_connections": 3
   },
   "redis": {
     "addr": "localhost:6379",

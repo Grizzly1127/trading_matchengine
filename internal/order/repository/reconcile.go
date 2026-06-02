@@ -11,33 +11,6 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/order/status"
 )
 
-// FindStalePendingForReject 返回已投递 NewOrder 但仍 PENDING 且超时的订单 ID。
-func (r *Repository) FindStalePendingForReject(ctx context.Context, olderThan time.Time, limit int) ([]uint64, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	const q = `
-SELECT o.id
-FROM orders o
-WHERE o.status = $1
-  AND o.updated_at < $2
-  AND EXISTS (
-    SELECT 1 FROM order_outbox ob
-    WHERE ob.aggregate_id = o.id
-      AND ob.event_type = $3
-      AND ob.published_at IS NOT NULL
-  )
-ORDER BY o.id ASC
-LIMIT $4`
-
-	rows, err := r.pool.Query(ctx, q, status.Pending, olderThan, outbox.EventTypeNewOrder, limit)
-	if err != nil {
-		return nil, fmt.Errorf("find stale pending: %w", err)
-	}
-	defer rows.Close()
-	return scanOrderIDs(rows)
-}
-
 // RejectStalePending 将超时 PENDING 置为 REJECTED、释放冻结，并写入 Cancel Outbox 通知撮合摘单。
 func (r *Repository) RejectStalePending(ctx context.Context, orderID uint64, outboxTopic string) (bool, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -63,7 +36,7 @@ func (r *Repository) RejectStalePending(ctx context.Context, orderID uint64, out
 	if err != nil {
 		return false, err
 	}
-	if err := releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
+	if err := r.releaseOrderRemainingFreeze(ctx, tx, current); err != nil {
 		return false, err
 	}
 	if err := insertCancelOutbox(ctx, tx, current, outboxTopic); err != nil {

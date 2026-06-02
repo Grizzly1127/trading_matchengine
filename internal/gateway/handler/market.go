@@ -7,14 +7,18 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/grpcerr"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/response"
+	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	"github.com/rs/zerolog"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Market struct {
-	MarketData marketdatav1.MarketDataServiceClient
-	Log        zerolog.Logger
+	MarketData   marketdatav1.MarketDataServiceClient
+	SymbolRules  *symbolrules.Registry
+	AssetRules   *symbolrules.AssetRegistry
+	Log          zerolog.Logger
 }
 
 func (h *Market) Depth(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +48,7 @@ func (h *Market) Depth(w http.ResponseWriter, r *http.Request) {
 		grpcerr.Write(w, r, err)
 		return
 	}
-	response.WriteOK(w, r, http.StatusOK, map[string]interface{}{
+	response.WriteOK(w, r, http.StatusOK, map[string]any{
 		"symbol":         resp.GetSymbol(),
 		"last_update_id": strconv.FormatUint(resp.GetLastUpdateId(), 10),
 		"bids":           pbLevelsToJSON(resp.GetBids()),
@@ -84,11 +88,90 @@ func (h *Market) Ticker(w http.ResponseWriter, r *http.Request) {
 		response.WriteOK(w, r, http.StatusOK, pbTickerToJSON(resp.GetTicker()))
 		return
 	}
-	items := make([]map[string]interface{}, 0, len(resp.GetItems()))
+	items := make([]map[string]any, 0, len(resp.GetItems()))
 	for _, item := range resp.GetItems() {
 		items = append(items, pbTickerToJSON(item))
 	}
-	response.WriteOK(w, r, http.StatusOK, map[string]interface{}{"items": items})
+	response.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
+// TickerAll 全市场 Ticker 冷启动快照（rest-api §4.2.1）。
+func (h *Market) TickerAll(w http.ResponseWriter, r *http.Request) {
+	quoteAsset := strings.TrimSpace(r.URL.Query().Get("quote_asset"))
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	if statusFilter == "" {
+		statusFilter = "TRADING"
+	}
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "json"
+	}
+	if format != "json" {
+		grpcerr.Write(w, r, grpcerr.BadRequest("only format=json is supported"))
+		return
+	}
+
+	snapshotID := strings.TrimSpace(r.URL.Query().Get("snapshot_id"))
+	if snapshotID == "" {
+		snapshotID = strings.Trim(strings.TrimSpace(r.Header.Get("If-None-Match")), `"`)
+	}
+
+	resp, err := h.MarketData.GetTickerAllSnapshot(r.Context(), &marketdatav1.GetTickerAllSnapshotRequest{
+		QuoteAsset: quoteAsset,
+		SnapshotId: snapshotID,
+	})
+	if err != nil {
+		grpcerr.Write(w, r, err)
+		return
+	}
+
+	setTickerAllSnapshotHeaders(w, resp.GetSnapshotId(), resp.GetSnapshotTime())
+	if resp.GetNotModified() {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	items := filterTickerAllItems(resp.GetItems(), h.SymbolRules, statusFilter)
+	data := map[string]any{
+		"snapshot_id": resp.GetSnapshotId(),
+		"count":       len(items),
+		"items":       items,
+	}
+	if ts := resp.GetSnapshotTime(); ts != nil {
+		data["snapshot_time"] = ts.AsTime().UTC().Format(timeLayoutMilli)
+	}
+	response.WriteOK(w, r, http.StatusOK, data)
+}
+
+// Symbols 返回可交易对元数据（与 configs/symbols.json 一致）。
+func (h *Market) Symbols(w http.ResponseWriter, r *http.Request) {
+	if h.SymbolRules == nil {
+		grpcerr.Write(w, r, grpcerr.BadRequest("symbols not configured"))
+		return
+	}
+	items := make([]map[string]any, 0)
+	for _, sp := range h.SymbolRules.All() {
+		items = append(items, symbolSpecToJSON(sp, h.AssetRules))
+	}
+	response.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
+func symbolSpecToJSON(sp symbolrules.Spec, assets *symbolrules.AssetRegistry) map[string]any {
+	out := map[string]any{
+		"symbol":             sp.Symbol,
+		"base_asset":         sp.BaseAsset,
+		"quote_asset":        sp.QuoteAsset,
+		"price_precision":    sp.PricePrecision,
+		"quantity_precision": sp.QuantityPrecision,
+		"min_quantity":       sp.MinQuantity.String(),
+		"min_notional":       sp.MinNotional.String(),
+		"status":             sp.Status,
+	}
+	if assets != nil {
+		out["base_asset_precision"] = assets.Precision(sp.BaseAsset)
+		out["quote_asset_precision"] = assets.Precision(sp.QuoteAsset)
+	}
+	return out
 }
 
 const timeLayoutMilli = "2006-01-02T15:04:05.000Z07:00"
@@ -101,8 +184,52 @@ func pbLevelsToJSON(in []*marketdatav1.PriceLevel) [][]string {
 	return out
 }
 
-func pbTickerToJSON(t *marketdatav1.Ticker) map[string]interface{} {
-	return map[string]interface{}{
+func setTickerAllSnapshotHeaders(w http.ResponseWriter, snapshotID string, snapshotTime *timestamppb.Timestamp) {
+	if snapshotID != "" {
+		w.Header().Set("X-Snapshot-Id", snapshotID)
+	}
+	if snapshotTime != nil {
+		w.Header().Set("X-Snapshot-Time", snapshotTime.AsTime().UTC().Format(timeLayoutMilli))
+	}
+}
+
+func filterTickerAllItems(items []*marketdatav1.TickerAllItem, rules *symbolrules.Registry, status string) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	wantStatus := strings.ToUpper(strings.TrimSpace(status))
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if rules != nil && wantStatus != "" {
+			sp, err := rules.Lookup(item.GetSymbol())
+			if err != nil || strings.ToUpper(sp.Status) != wantStatus {
+				continue
+			}
+		}
+		out = append(out, pbTickerAllItemToJSON(item))
+	}
+	return out
+}
+
+func pbTickerAllItemToJSON(item *marketdatav1.TickerAllItem) map[string]any {
+	out := map[string]any{
+		"symbol":               item.GetSymbol(),
+		"last_price":           dec(item.GetLastPrice()),
+		"volume":               dec(item.GetVolume()),
+		"quote_volume":         dec(item.GetQuoteVolume()),
+		"price_change_percent": dec(item.GetPriceChangePercent()),
+	}
+	if ts := item.GetTimestamp(); ts != nil {
+		out["timestamp"] = ts.AsTime().UTC().Format(timeLayoutMilli)
+	}
+	return out
+}
+
+func pbTickerToJSON(t *marketdatav1.Ticker) map[string]any {
+	return map[string]any{
 		"symbol":               t.GetSymbol(),
 		"last_price":           dec(t.GetLastPrice()),
 		"open_price":           dec(t.GetOpenPrice()),

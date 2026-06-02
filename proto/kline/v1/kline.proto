@@ -33,3 +33,17 @@ message Kline {
     common.v1.Decimal volume = 7;
     bool is_closed = 8;
 }
+
+// KlineClosedEvent 发布至 Kafka topic kline.raw（bar 闭合通知）。
+message KlineClosedEvent {
+    string symbol = 1;
+    string interval = 2;
+    int64 open_time_ms = 3;
+    int64 close_time_ms = 4;
+    common.v1.Decimal open = 5;
+    common.v1.Decimal high = 6;
+    common.v1.Decimal low = 7;
+    common.v1.Decimal close = 8;
+    common.v1.Decimal volume = 9;
+    int64 ts_ms = 10;
+}

@@ -20,6 +20,9 @@ help:
 test:
 	go test ./...
 
+test-integration:
+	go test -tags=integration -count=1 -timeout 5m ./internal/order/integration/...
+
 test-race:
 	go test -race ./...
 
@@ -31,14 +34,16 @@ cover:
 tidy:
 	go mod tidy
 
-build:
+build: gen-proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/matching ./cmd/matching
 	go build -o $(BIN_DIR)/order ./cmd/order
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
+	go build -o $(BIN_DIR)/auth ./cmd/auth
 	go build -o $(BIN_DIR)/push ./cmd/push
 	go build -o $(BIN_DIR)/kline ./cmd/kline
 	go build -o $(BIN_DIR)/marketdata ./cmd/marketdata
+	go build -o $(BIN_DIR)/indexprice ./cmd/indexprice
 
 build-matching:
 	@mkdir -p $(BIN_DIR)
@@ -52,6 +57,10 @@ build-gateway:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/gateway ./cmd/gateway
 
+build-auth:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/auth ./cmd/auth
+
 build-push:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/push ./cmd/push
@@ -63,6 +72,10 @@ build-kline:
 build-marketdata:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/marketdata ./cmd/marketdata
+
+build-indexprice: gen-proto
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/indexprice ./cmd/indexprice
 
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html

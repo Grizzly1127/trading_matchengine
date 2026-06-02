@@ -2,15 +2,17 @@
 # 本地开发：一键启动 / 停止 / 查看所有微服务
 #
 # 用法:
-#   ./scripts/dev.sh start   [--build] [--migrate] [--kafka-topics]
+#   ./scripts/dev.sh start   [--build] [--migrate] [--kafka-topics] [--auth] [--jwt]
 #   ./scripts/dev.sh stop
-#   ./scripts/dev.sh restart [--build] [--migrate] [--kafka-topics]
+#   ./scripts/dev.sh restart [--build] [--migrate] [--kafka-topics] [--auth] [--jwt]
 #   ./scripts/dev.sh status
 #
 # 启动顺序（依赖由先到后）:
-#   matching → order → marketdata → kline → push → gateway
+#   matching → order → marketdata → kline → indexprice → push → [auth] → gateway
 #
-# 停止顺序为上述逆序。
+# 选项:
+#   --auth   额外启动 cmd/auth（:8090，签发服务 JWT）
+#   --jwt    Gateway/Push 使用 configs/*.jwt-dev.json（需配合 --auth 或外部 IdP）
 #
 # 说明:
 #   - WebSocket 由 Push 服务提供（默认 :8081/v1/ws），Gateway 仅 REST。
@@ -19,11 +21,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-SERVICES_START=(matching order marketdata kline push gateway)
-
 DO_BUILD=false
 DO_MIGRATE=false
 DO_KAFKA_TOPICS=false
+DO_AUTH=false
+DO_JWT=false
 
 usage() {
   cat <<EOF
@@ -39,17 +41,24 @@ usage() {
   --build         各服务启动前编译对应二进制（等价于各 *.sh start --build）
   --migrate       启动前执行 scripts/migrate-up.sh（需 psql + PostgreSQL）
   --kafka-topics  启动前执行 scripts/kafka-create-topics.sh（需 docker kafka）
+  --auth          启动轻量 JWT 签发服务（scripts/auth.sh，:8090）
+  --jwt           Gateway/Push 使用 JWT 验签配置（需 --auth 或外部 IdP）
 
 示例:
   $(basename "$0") start --build
-  $(basename "$0") start --build --migrate
+  $(basename "$0") start --build --auth --jwt
   $(basename "$0") status
   $(basename "$0") stop
 
 WebSocket: ws://localhost:8081/v1/ws  （Push）
 REST API:  http://localhost:8080       （Gateway）
+Auth 签发: http://localhost:8090       （仅 --auth）
 
-联调用例: ./scripts/e2e-api.sh  （见 scripts/e2e-api.md）
+联调:
+  ./scripts/e2e-api.sh              # static token（默认）
+  ./scripts/e2e-api.sh jwt          # 从 auth 取 JWT 后跑全流程
+
+详见: scripts/e2e-api.md、docs/gateway-auth.md
 EOF
 }
 
@@ -63,6 +72,8 @@ parse_global_opts() {
       --build) DO_BUILD=true; shift ;;
       --migrate) DO_MIGRATE=true; shift ;;
       --kafka-topics) DO_KAFKA_TOPICS=true; shift ;;
+      --auth) DO_AUTH=true; shift ;;
+      --jwt) DO_JWT=true; shift ;;
       *)
         return 0
         ;;
@@ -92,11 +103,49 @@ run_service() {
   "$script" "$cmd" "${extra[@]}" "$@"
 }
 
+# 启动列表（auth 在 gateway 之前）
+services_start_list() {
+  local names=(matching order marketdata kline indexprice push)
+  if $DO_AUTH; then
+    names+=(auth)
+  fi
+  names+=(gateway)
+  printf '%s\n' "${names[@]}"
+}
+
+# 停止列表（逆序；始终尝试停 auth）
 services_stop_list() {
-  printf '%s\n' "${SERVICES_START[@]}" | tac
+  printf '%s\n' gateway auth push indexprice kline marketdata order matching
+}
+
+ensure_jwt_dev_configs() {
+  local pair
+  for pair in gateway:gateway push:push; do
+    local svc="${pair%%:*}"
+    local dst="$ROOT/configs/${svc}.jwt-dev.json"
+    local ex="$ROOT/configs/${svc}.jwt-dev.json.example"
+    if [[ ! -f "$dst" ]]; then
+      if [[ ! -f "$ex" ]]; then
+        log "ERROR: missing $ex (required for --jwt)" >&2
+        exit 1
+      fi
+      cp "$ex" "$dst"
+      log "created $dst from example"
+    fi
+  done
+}
+
+apply_jwt_env() {
+  export GATEWAY_CONFIG="$ROOT/configs/gateway.jwt-dev.json"
+  export PUSH_CONFIG="$ROOT/configs/push.jwt-dev.json"
+  log "JWT mode: GATEWAY_CONFIG=$GATEWAY_CONFIG PUSH_CONFIG=$PUSH_CONFIG"
 }
 
 preflight() {
+  if $DO_JWT; then
+    ensure_jwt_dev_configs
+    apply_jwt_env
+  fi
   if $DO_MIGRATE; then
     log ">>> migrate-up"
     bash "$ROOT/scripts/migrate-up.sh"
@@ -109,11 +158,15 @@ preflight() {
 
 cmd_start() {
   parse_global_opts "$@"
+  if $DO_JWT && ! $DO_AUTH; then
+    log "WARN: --jwt without --auth; ensure external IdP or auth already running"
+  fi
   preflight
   local name
-  for name in "${SERVICES_START[@]}"; do
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
     run_service "$name" start
-  done
+  done < <(services_start_list)
   log "all services started"
 }
 
@@ -129,15 +182,19 @@ cmd_stop() {
 
 cmd_restart() {
   parse_global_opts "$@"
+  if $DO_JWT && ! $DO_AUTH; then
+    log "WARN: --jwt without --auth; ensure external IdP or auth already running"
+  fi
   local name
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
     run_service "$name" stop || true
   done < <(services_stop_list)
   preflight
-  for name in "${SERVICES_START[@]}"; do
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
     run_service "$name" start
-  done
+  done < <(services_start_list)
   log "all services restarted"
 }
 
@@ -145,14 +202,15 @@ cmd_status() {
   parse_global_opts "$@"
   local failed=0
   local name
-  for name in "${SERVICES_START[@]}"; do
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
     log "--- $name ---"
     if run_service "$name" status; then
       :
     else
       ((failed++)) || true
     fi
-  done
+  done < <(services_start_list)
   if (( failed > 0 )); then
     log "$failed service(s) not running"
     return 1

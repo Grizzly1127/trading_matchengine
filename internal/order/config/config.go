@@ -9,14 +9,20 @@ import (
 
 // Config 是 order 进程启动配置。
 type Config struct {
-	GRPCListen     string           `json:"grpc_listen"`
-	DatabaseURL    string           `json:"database_url"`
-	MigrateOnStart bool             `json:"migrate_on_start"`
-	DefaultSymbol  string           `json:"default_symbol"`
-	MarketData     MarketDataConfig `json:"marketdata"`
-	Kafka          KafkaConfig      `json:"kafka"`
-	Reconciler     ReconcilerConfig `json:"reconciler"`
-	Log            LogConfig        `json:"log"`
+	GRPCListen     string                      `json:"grpc_listen"`
+	MetricsListen  string                      `json:"metrics_listen"`
+	DatabaseURL    string                      `json:"database_url"`
+	MigrateOnStart bool                        `json:"migrate_on_start"`
+	DefaultSymbol  string                      `json:"default_symbol"`
+	SymbolsFile    string                      `json:"symbols_file"`
+	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
+	MarketData     MarketDataConfig            `json:"marketdata"`
+	Matching       MatchingConfig              `json:"matching"`
+	Kafka          KafkaConfig                 `json:"kafka"`
+	Redis          RedisConfig                 `json:"redis"`
+	Idempotency    IdempotencyConfig           `json:"idempotency"`
+	Reconciler     ReconcilerConfig            `json:"reconciler"`
+	Log            LogConfig                   `json:"log"`
 }
 
 type MarketDataConfig struct {
@@ -24,6 +30,26 @@ type MarketDataConfig struct {
 	DialTimeoutSeconds    int     `json:"dial_timeout_seconds"`
 	RequestTimeoutSeconds int     `json:"request_timeout_seconds"`
 	SlippageBuffer        float64 `json:"slippage_buffer"`
+}
+
+// RedisConfig WS 订单推送（order:{user_id}）及可选幂等缓存。
+type RedisConfig struct {
+	Addr     string `json:"addr"`
+	Password string `json:"password"`
+	DB       int    `json:"db"`
+}
+
+// IdempotencyConfig 下单幂等 Redis 缓存（Phase 1 仍以 PG 唯一索引为准）。
+type IdempotencyConfig struct {
+	Enabled  bool `json:"enabled"`
+	TTLHours int  `json:"ttl_hours"`
+}
+
+// MatchingConfig 撮合对账 gRPC（§4.5）。
+type MatchingConfig struct {
+	Enabled            bool   `json:"enabled"`
+	GRPCAddr           string `json:"grpc_addr"`
+	DialTimeoutSeconds int    `json:"dial_timeout_seconds"`
 }
 
 // ReconcilerConfig 超时补偿 scheduler（§4.5）。
@@ -96,6 +122,20 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.GRPCListen == "" {
 		c.GRPCListen = ":50051"
 	}
+	if _, ok := raw["metrics_listen"]; !ok {
+		if c.MetricsListen == "" {
+			c.MetricsListen = ":9104"
+		}
+	}
+	if c.Matching.GRPCAddr == "" {
+		c.Matching.GRPCAddr = "localhost:50061"
+	}
+	if c.Matching.DialTimeoutSeconds <= 0 {
+		c.Matching.DialTimeoutSeconds = 3
+	}
+	if _, ok := raw["matching"]; !ok {
+		c.Matching.Enabled = true
+	}
 	if c.DefaultSymbol == "" {
 		c.DefaultSymbol = "BTC-USDT"
 	}
@@ -115,7 +155,10 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		c.MigrateOnStart = true
 	}
 	c.applyKafkaDefaults(raw)
+	c.applyRedisDefaults(raw)
+	c.applyIdempotencyDefaults(raw)
 	c.applyReconcilerDefaults(raw)
+	c.applySymbolDefaults()
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}
@@ -173,6 +216,21 @@ func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
 		}
 	} else if c.Kafka.ConsumerStartOffset == 0 {
 		c.Kafka.ConsumerStartOffset = -1
+	}
+}
+
+func (c *Config) applyRedisDefaults(_ map[string]json.RawMessage) {
+	if c.Redis.Addr == "" {
+		c.Redis.Addr = "localhost:6379"
+	}
+}
+
+func (c *Config) applyIdempotencyDefaults(raw map[string]json.RawMessage) {
+	if _, ok := raw["idempotency"]; !ok {
+		c.Idempotency.Enabled = true
+	}
+	if c.Idempotency.TTLHours <= 0 {
+		c.Idempotency.TTLHours = 24
 	}
 }
 
