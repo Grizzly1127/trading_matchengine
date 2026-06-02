@@ -17,7 +17,7 @@ func Health(w http.ResponseWriter, r *http.Request) {
 // Time 返回服务器 UTC 时间与毫秒时间戳。
 func Time(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
-	response.WriteOK(w, r, http.StatusOK, map[string]interface{}{
+	response.WriteOK(w, r, http.StatusOK, map[string]any{
 		"server_time": formatISO8601UTC(now),
 		"unix_ms":     now.UnixMilli(),
 	})

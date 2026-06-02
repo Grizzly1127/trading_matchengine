@@ -11,7 +11,13 @@ type Config struct {
 	// Mode: static | jwt | static_or_jwt
 	Mode        string `json:"mode"`
 	StaticToken string `json:"static_token"`
-	JWT         JWTConfig `json:"jwt"`
+	// StaticScopes 普通档位 static token 的 scope；为空则兼容旧行为（放行 AllScopes）。
+	StaticScopes []string `json:"static_scopes"`
+	// MarketMakerStaticToken 做市商档位 static token（可选，与 StaticToken 二选一使用）。
+	MarketMakerStaticToken string `json:"market_maker_static_token"`
+	// MarketMakerStaticScopes 做市商 token 的 scope；为空且配置了 MarketMakerStaticToken 时默认含 push:ticker_all。
+	MarketMakerStaticScopes []string `json:"market_maker_static_scopes"`
+	JWT                   JWTConfig `json:"jwt"`
 }
 
 // JWTConfig JWT 验签参数。

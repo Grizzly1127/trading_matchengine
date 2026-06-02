@@ -16,7 +16,6 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/server"
 	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
-	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 )
 
 func main() {
@@ -65,25 +64,28 @@ func main() {
 		log.Fatal().Err(err).Str("order_grpc_addr", cfg.OrderService.GRPCAddr).Msg("connect order service")
 	}
 	defer orderClients.Close()
+
 	mdClients, err := client.ConnectMarketData(initCtx, cfg.MarketDataService)
 	if err != nil {
 		log.Fatal().Err(err).Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).Msg("connect marketdata service")
 	}
 	defer mdClients.Close()
 
+	klClients, err := client.ConnectKline(initCtx, cfg.KlineService)
+	if err != nil {
+		log.Fatal().Err(err).Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).Msg("connect kline service")
+	}
+	defer klClients.Close()
+
+	ipClients, err := client.ConnectIndexPrice(initCtx, cfg.IndexPriceService)
+	if err != nil {
+		log.Fatal().Err(err).Str("indexprice_grpc_addr", cfg.IndexPriceService.GRPCAddr).Msg("connect indexprice service")
+	}
+	defer ipClients.Close()
+
 	rulesCfg, err := cfg.LoadRules()
 	if err != nil {
 		log.Fatal().Err(err).Msg("symbol rules")
-	}
-
-	var klineClient klinev1.KlineServiceClient
-	if cfg.KlineService.GRPCAddr != "" {
-		klClients, err := client.ConnectKline(initCtx, cfg.KlineService)
-		if err != nil {
-			log.Fatal().Err(err).Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).Msg("connect kline service")
-		}
-		defer klClients.Close()
-		klineClient = klClients.Client
 	}
 
 	tlsCfg, err := auth.ServerTLS(cfg.TLS)
@@ -101,7 +103,8 @@ func main() {
 		Order:      orderClients.OrderClient,
 		Balance:    orderClients.BalanceClient,
 		MarketData: mdClients.Client,
-		Kline:      klineClient,
+		Kline:      klClients.Client,
+		IndexPrice: ipClients.Client,
 		Symbols:    rulesCfg.Registry,
 		Assets:     rulesCfg.Assets,
 	})
@@ -121,6 +124,7 @@ func main() {
 			Str("order_grpc_addr", cfg.OrderService.GRPCAddr).
 			Str("marketdata_grpc_addr", cfg.MarketDataService.GRPCAddr).
 			Str("kline_grpc_addr", cfg.KlineService.GRPCAddr).
+			Str("indexprice_grpc_addr", cfg.IndexPriceService.GRPCAddr).
 			Msg("gateway ready")
 		var err error
 		if tlsCfg != nil {

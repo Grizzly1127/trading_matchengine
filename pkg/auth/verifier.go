@@ -11,9 +11,12 @@ import (
 
 // Verifier 校验 Bearer（static / JWT）。
 type Verifier struct {
-	mode        string
-	staticToken string
-	issuers     *issuerRegistry
+	mode                   string
+	staticToken            string
+	staticScopes           []string
+	marketMakerStaticToken string
+	marketMakerStaticScopes []string
+	issuers                *issuerRegistry
 }
 
 // NewVerifier 根据配置构造验签器。
@@ -22,8 +25,11 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 		return nil, err
 	}
 	v := &Verifier{
-		mode:        cfg.Mode,
-		staticToken: cfg.StaticToken,
+		mode:                    cfg.Mode,
+		staticToken:             cfg.StaticToken,
+		staticScopes:            append([]string(nil), cfg.StaticScopes...),
+		marketMakerStaticToken:  cfg.MarketMakerStaticToken,
+		marketMakerStaticScopes: marketMakerStaticScopes(cfg),
 	}
 	if cfg.Mode == "jwt" || cfg.Mode == "static_or_jwt" {
 		reg, err := newIssuerRegistry(ctx, cfg.JWT)
@@ -50,18 +56,46 @@ func (v *Verifier) VerifyBearer(_ context.Context, bearer string) (Claims, error
 	}
 
 	if v.mode == "static" || v.mode == "static_or_jwt" {
-		if token == v.staticToken {
-			return Claims{
-				Subject: "static-dev",
-				Scopes:  append([]string(nil), AllScopes...),
-				Method:  "static",
-			}, nil
+		if c, ok := v.verifyStaticToken(token); ok {
+			return c, nil
 		}
 		if v.mode == "static" {
 			return Claims{}, fmt.Errorf("invalid static token")
 		}
 	}
 	return v.issuers.validate(token)
+}
+
+func marketMakerStaticScopes(cfg Config) []string {
+	if len(cfg.MarketMakerStaticScopes) > 0 {
+		return append([]string(nil), cfg.MarketMakerStaticScopes...)
+	}
+	if cfg.MarketMakerStaticToken == "" {
+		return nil
+	}
+	return []string{
+		ScopeMarketRead,
+		ScopePushConnect,
+		ScopePushTickerAll,
+	}
+}
+
+func (v *Verifier) verifyStaticToken(token string) (Claims, bool) {
+	if token == v.staticToken && v.staticToken != "" {
+		scopes := append([]string(nil), AllScopes...)
+		if len(v.staticScopes) > 0 {
+			scopes = append([]string(nil), v.staticScopes...)
+		}
+		return Claims{Subject: "static-retail", Scopes: scopes, Method: "static"}, true
+	}
+	if token == v.marketMakerStaticToken && v.marketMakerStaticToken != "" {
+		return Claims{
+			Subject: "static-market-maker",
+			Scopes:  append([]string(nil), v.marketMakerStaticScopes...),
+			Method:  "static",
+		}, true
+	}
+	return Claims{}, false
 }
 
 // SignHS256 使用本地 HS256 签发服务 JWT（cmd/auth 与测试用）。

@@ -308,7 +308,7 @@ func (h *Orders) ListTrades(w http.ResponseWriter, r *http.Request) {
 	response.WriteOK(w, r, http.StatusOK, data)
 }
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxOrderBodyBytes)
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)

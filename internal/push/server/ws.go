@@ -116,6 +116,7 @@ func (s *WSServer) handleSubscribe(ctx context.Context, c *hub.Client, args []st
 			return
 		}
 	}
+	var snapshots [][]byte
 	for _, ch := range pending {
 		if ch == "order" {
 			if reqUserID == 0 {
@@ -130,7 +131,6 @@ func (s *WSServer) handleSubscribe(ctx context.Context, c *hub.Client, args []st
 		c.SetSubscribed(ch, true)
 		accepted = append(accepted, ch)
 
-		// 订阅后先发 snapshot（若 redis key 存在）。
 		if s.Redis == nil {
 			continue
 		}
@@ -150,10 +150,14 @@ func (s *WSServer) handleSubscribe(ctx context.Context, c *hub.Client, args []st
 			}
 			payload = frame
 		}
-		_ = c.Conn.WriteMessage(websocket.TextMessage, payload)
+		snapshots = append(snapshots, payload)
 	}
 	if len(accepted) > 0 {
 		_ = writeJSON(c, wsResp{Op: "subscribed", Args: accepted})
+	}
+	// §8.2：subscribed 确认后再推送 snapshot。
+	for _, payload := range snapshots {
+		_ = c.Conn.WriteMessage(websocket.TextMessage, payload)
 	}
 }
 

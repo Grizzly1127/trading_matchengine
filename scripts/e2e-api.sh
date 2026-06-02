@@ -19,6 +19,7 @@
 #   AUTH_CLIENT_ID    默认 web-bff
 #   AUTH_CLIENT_SECRET 默认与 configs/auth.json 一致
 #   TOKEN             Bearer（static 时默认 dev-token-change-me；jwt 时自动换取）
+#   MM_TOKEN          做市商 static token（默认 dev-mm-token-change-me，用于 ticker/all）
 #   SYMBOL            交易对（默认 BTC-USDT）
 #   USER_BUYER        买方 user_id（默认 1）
 #   USER_SELLER       卖方 user_id（默认 2）
@@ -34,6 +35,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 TOKEN="${TOKEN:-dev-token-change-me}"
+MM_TOKEN="${MM_TOKEN:-dev-mm-token-change-me}"
 SYMBOL="${SYMBOL:-BTC-USDT}"
 USER_BUYER="${USER_BUYER:-1}"
 USER_SELLER="${USER_SELLER:-2}"
@@ -423,6 +425,17 @@ step_query() {
   echo "$ticker" | pretty
   check_code_zero "$ticker" "ticker"
   assert_jq "$ticker" '.data.symbol == "'"${SYMBOL}"'"' "ticker symbol"
+
+  log "=== 全市场 Ticker 快照（做市商 token）==="
+  local tall
+  tall="$(curl -sS -X GET "${BASE_URL}/v1/market/ticker/all?quote_asset=USDT" \
+    -H "Authorization: Bearer ${MM_TOKEN}" \
+    -H "Accept: application/json")"
+  echo "$tall" | pretty
+  if [[ "$ASSERT" == "1" ]]; then
+    check_code_zero "$tall" "ticker/all"
+    assert_jq "$tall" '.data.snapshot_id != "" and (.data.items | type) == "array"' "ticker/all snapshot"
+  fi
 
   klines="$(api GET "${BASE_URL}/v1/klines?symbol=${SYMBOL}&interval=1m&limit=10")"
   echo "$klines" | pretty

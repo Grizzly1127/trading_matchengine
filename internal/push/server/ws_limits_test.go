@@ -160,6 +160,13 @@ func TestWSTickerAllSnapshotOnSubscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, subMsg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(subMsg), "subscribed") {
+		t.Fatalf("sub=%s", string(subMsg))
+	}
 	_, snapMsg, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
@@ -173,13 +180,6 @@ func TestWSTickerAllSnapshotOnSubscribe(t *testing.T) {
 	}
 	if frame.Type != "snapshot" || frame.Stream != "ticker@all:USDT" {
 		t.Fatalf("snap=%s", string(snapMsg))
-	}
-	_, subMsg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(subMsg), "subscribed") {
-		t.Fatalf("sub=%s", string(subMsg))
 	}
 }
 

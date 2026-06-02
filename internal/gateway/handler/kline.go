@@ -63,15 +63,15 @@ func (h *Kline) List(w http.ResponseWriter, r *http.Request) {
 		grpcerr.Write(w, r, err)
 		return
 	}
-	items := make([]map[string]interface{}, 0, len(resp.GetKlines()))
+	items := make([]map[string]any, 0, len(resp.GetKlines()))
 	for _, k := range resp.GetKlines() {
 		items = append(items, pbKlineToJSON(k))
 	}
-	response.WriteOK(w, r, http.StatusOK, map[string]interface{}{"items": items})
+	response.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
 }
 
-func pbKlineToJSON(k *klinev1.Kline) map[string]interface{} {
-	return map[string]interface{}{
+func pbKlineToJSON(k *klinev1.Kline) map[string]any {
+	return map[string]any{
 		"open_time":  k.GetOpenTime().AsTime().UTC().Format(timeLayoutMilli),
 		"close_time": k.GetCloseTime().AsTime().UTC().Format(timeLayoutMilli),
 		"open":       dec(k.GetOpen()),

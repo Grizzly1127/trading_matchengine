@@ -26,6 +26,35 @@ func TestVerifier_StaticMode(t *testing.T) {
 	}
 }
 
+func TestVerifier_StaticTierIsolation(t *testing.T) {
+	v, err := NewVerifier(context.Background(), Config{
+		Mode:                   "static",
+		StaticToken:            "retail",
+		StaticScopes:           []string{ScopePushConnect, ScopeMarketRead},
+		MarketMakerStaticToken: "mm",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+
+	retail, err := v.VerifyBearer(context.Background(), "retail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HasScopes(retail, ScopePushTickerAll) {
+		t.Fatalf("retail scopes=%v", retail.Scopes)
+	}
+
+	mm, err := v.VerifyBearer(context.Background(), "mm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !HasScopes(mm, ScopePushTickerAll) || !HasScopes(mm, ScopePushConnect) {
+		t.Fatalf("mm scopes=%v", mm.Scopes)
+	}
+}
+
 func TestVerifier_HS256JWT(t *testing.T) {
 	secret := []byte("test-hs256-secret-key")
 	issuer := "trading-matchengine-dev"

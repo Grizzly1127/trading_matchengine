@@ -62,7 +62,7 @@ flowchart LR
 | `kline:open:{symbol}:{interval}` | ✅ | JSON | `interval + 1min` | Kline Service | Kline 启动恢复、Push（若订阅） |
 | `kline:pending:close` | ✅ | LIST（JSON 元素） | 无 | Kline Service | Kline Worker 消费 |
 | `svc:heartbeat:{service}` | ✅ | 毫秒时间戳字符串 | 10s | Market Data（预留 API） | 监控/探活 |
-| `idempotent:order:{client_order_id}` | 📋 规划 | — | 24h（架构） | — | Order 幂等（当前用 PostgreSQL） |
+| `idempotent:order:{user_id}:{client_order_id}` | ✅ | order_id 十进制字符串 | 24h（可配置） | Order Service | PlaceOrder 幂等热路径；权威仍在 PG |
 | `index:{symbol}` | ✅ | JSON | 10s | Index Price | Push WS、gRPC |
 
 `{symbol}` 示例：`BTC-USDT`。`{interval}` 示例：`1m`、`1s`、`1h`（见 `pkg/kline/interval`）。  
@@ -366,7 +366,7 @@ Market Data / Kline
 
 | 能力 | Key / 频道 | 说明 |
 |------|------------|------|
-| 下单幂等锁 | `idempotent:order:{client_order_id}` | 当前 Order 使用 PG 表 `client_order_idempotency` |
+| ~~下单幂等锁~~ | `idempotent:order:{user_id}:{client_order_id}` | **已实现**（Redis 缓存 + PG `client_order_idempotency` 双轨） |
 | 指数价格 | `index:{symbol}`、`index:*` | Index Price Service |
 | 公开成交推送 | `trade:{symbol}` | Market Data `PublishTrade` |
 | 用户订单推送 | WS `order` / Redis `order:{user_id}` | Order `PublishOrderUpdate`（match.events 落库后） |

@@ -20,6 +20,7 @@ type Config struct {
 	Matching       MatchingConfig              `json:"matching"`
 	Kafka          KafkaConfig                 `json:"kafka"`
 	Redis          RedisConfig                 `json:"redis"`
+	Idempotency    IdempotencyConfig           `json:"idempotency"`
 	Reconciler     ReconcilerConfig            `json:"reconciler"`
 	Log            LogConfig                   `json:"log"`
 }
@@ -31,11 +32,17 @@ type MarketDataConfig struct {
 	SlippageBuffer        float64 `json:"slippage_buffer"`
 }
 
-// RedisConfig WS 订单推送（order:{user_id}）。
+// RedisConfig WS 订单推送（order:{user_id}）及可选幂等缓存。
 type RedisConfig struct {
 	Addr     string `json:"addr"`
 	Password string `json:"password"`
 	DB       int    `json:"db"`
+}
+
+// IdempotencyConfig 下单幂等 Redis 缓存（Phase 1 仍以 PG 唯一索引为准）。
+type IdempotencyConfig struct {
+	Enabled  bool `json:"enabled"`
+	TTLHours int  `json:"ttl_hours"`
 }
 
 // MatchingConfig 撮合对账 gRPC（§4.5）。
@@ -149,6 +156,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 	c.applyKafkaDefaults(raw)
 	c.applyRedisDefaults(raw)
+	c.applyIdempotencyDefaults(raw)
 	c.applyReconcilerDefaults(raw)
 	c.applySymbolDefaults()
 	if c.Log.Level == "" {
@@ -214,6 +222,15 @@ func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
 func (c *Config) applyRedisDefaults(_ map[string]json.RawMessage) {
 	if c.Redis.Addr == "" {
 		c.Redis.Addr = "localhost:6379"
+	}
+}
+
+func (c *Config) applyIdempotencyDefaults(raw map[string]json.RawMessage) {
+	if _, ok := raw["idempotency"]; !ok {
+		c.Idempotency.Enabled = true
+	}
+	if c.Idempotency.TTLHours <= 0 {
+		c.Idempotency.TTLHours = 24
 	}
 }
 

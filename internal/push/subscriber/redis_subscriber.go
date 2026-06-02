@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/push/hub"
+	"github.com/Grizzly1127/trading_matchengine/internal/push/limits"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
+	"github.com/Grizzly1127/trading_matchengine/pkg/tickerall"
 	"github.com/rs/zerolog"
 )
 
@@ -34,6 +36,10 @@ func (r *RedisFanout) Run(ctx context.Context) error {
 			return err
 		}
 		payload := []byte(msg.Payload)
+		if limits.IsTickerAllChannel(msg.Channel) && !tickerall.IsWSFrame(payload) {
+			r.Log.Warn().Str("channel", msg.Channel).Msg("drop non §8.2 ticker@all frame")
+			continue
+		}
 		if uid, ok := hub.ParseOrderChannel(msg.Channel); ok {
 			r.Hub.BroadcastOrder(uid, payload)
 			continue

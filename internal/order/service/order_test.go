@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 	"github.com/shopspring/decimal"
 
+	"github.com/alicebob/miniredis/v2"
+
+	"github.com/Grizzly1127/trading_matchengine/internal/order/idempotency"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
+	pkgredis "github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 )
 
@@ -312,5 +317,54 @@ func TestPlaceOrder_MarketDataUnavailable_ReturnsUnavailable(t *testing.T) {
 	_, err := svc.PlaceOrder(context.Background(), req)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
+	}
+}
+
+func TestPlaceOrder_IdempotentRedisCache(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb, err := pkgredis.NewClient(pkgredis.Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rdb.Close()
+
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
+	svc := &OrderService{
+		Repo:        store,
+		OutboxTopic: "order.commands",
+		Idempotency: idempotency.NewRedisCache(rdb, time.Hour),
+	}
+
+	req := &orderv1.PlaceOrderRequest{
+		UserId:        1,
+		ClientOrderId: "redis-idem",
+		Symbol:        "BTC-USDT",
+		Side:          commonv1.Side_SIDE_BUY,
+		Type:          commonv1.OrderType_ORDER_TYPE_LIMIT,
+		Price:         &commonv1.Decimal{Value: "100"},
+		Quantity:      &commonv1.Decimal{Value: "1"},
+	}
+	resp1, err := svc.PlaceOrder(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first PlaceOrder: %v", err)
+	}
+	if resp1.GetIdempotentHit() {
+		t.Fatal("first request should not be idempotent hit")
+	}
+
+	delete(store.byClient, idemKey(1, "redis-idem"))
+
+	resp2, err := svc.PlaceOrder(context.Background(), req)
+	if err != nil {
+		t.Fatalf("second PlaceOrder: %v", err)
+	}
+	if !resp2.GetIdempotentHit() {
+		t.Fatal("expected idempotent hit from redis cache")
+	}
+	if resp2.GetOrderId() != resp1.GetOrderId() {
+		t.Fatalf("order_id=%d want %d", resp2.GetOrderId(), resp1.GetOrderId())
+	}
+	if len(store.byClient) != 0 {
+		t.Fatal("redis hit should not call InsertPending again")
 	}
 }

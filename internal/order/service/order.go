@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/Grizzly1127/trading_matchengine/internal/order/idempotency"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
@@ -44,6 +45,7 @@ type OrderService struct {
 	Repo           OrderStore
 	OutboxTopic    string
 	MarketData     ReferencePriceClient
+	Idempotency    *idempotency.RedisCache
 	SlippageBuffer decimal.Decimal
 	Symbols        *symbolrules.Registry
 }
@@ -74,11 +76,9 @@ func (s *OrderService) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRe
 	}
 	in.OutboxTopic = s.OutboxTopic
 
-	existing, err := s.Repo.FindByClientOrderID(ctx, in.UserID, in.ClientOrderID)
-	if err != nil {
+	if existing, ok, err := s.lookupIdempotentOrder(ctx, in.UserID, in.ClientOrderID); err != nil {
 		return nil, err
-	}
-	if existing != nil {
+	} else if ok {
 		return toPlaceOrderResponse(existing, true), nil
 	}
 
@@ -89,8 +89,36 @@ func (s *OrderService) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRe
 		}
 		return nil, err
 	}
+	if s.Idempotency != nil {
+		_ = s.Idempotency.Remember(ctx, in.UserID, in.ClientOrderID, order.ID)
+	}
 
 	return toPlaceOrderResponse(order, false), nil
+}
+
+// lookupIdempotentOrder 先查 Redis 缓存，未命中再查 PG；命中时回填缓存。
+func (s *OrderService) lookupIdempotentOrder(ctx context.Context, userID uint64, clientOrderID string) (*repository.Order, bool, error) {
+	if s.Idempotency != nil {
+		orderID, hit, err := s.Idempotency.Lookup(ctx, userID, clientOrderID)
+		if err == nil && hit {
+			o, err := s.Repo.GetOrderByUser(ctx, userID, orderID)
+			if err == nil && o != nil {
+				return o, true, nil
+			}
+		}
+	}
+
+	existing, err := s.Repo.FindByClientOrderID(ctx, userID, clientOrderID)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing == nil {
+		return nil, false, nil
+	}
+	if s.Idempotency != nil {
+		_ = s.Idempotency.Remember(ctx, userID, clientOrderID, existing.ID)
+	}
+	return existing, true, nil
 }
 
 // CancelOrder 将订单置为 CANCELING 并写入撤单 Outbox。

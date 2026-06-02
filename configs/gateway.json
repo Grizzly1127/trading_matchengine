@@ -12,10 +12,28 @@
     "grpc_addr": "localhost:50053",
     "dial_seconds": 10
   },
+  "indexprice_service": {
+    "grpc_addr": "localhost:50054",
+    "dial_seconds": 10
+  },
   "symbols_file": "configs/symbols.json",
   "auth": {
     "mode": "static",
-    "static_token": "dev-token-change-me"
+    "static_token": "dev-token-change-me",
+    "static_scopes": [
+      "orders:read",
+      "orders:write",
+      "balances:read",
+      "balances:admin",
+      "market:read",
+      "push:connect"
+    ],
+    "market_maker_static_token": "dev-mm-token-change-me",
+    "market_maker_static_scopes": [
+      "market:read",
+      "push:connect",
+      "push:ticker_all"
+    ]
   },
   "tls": {
     "enabled": false

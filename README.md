@@ -12,10 +12,10 @@
 | Kline Service | `cmd/kline` | gRPC `:50053` | K 线聚合、PostgreSQL + Redis |
 | Push Service | `cmd/push` | HTTP/WS `:8081` | WebSocket `/v1/ws`、Redis 扇出 |
 | API Gateway | `cmd/gateway` | HTTP `:8080` | 对外 REST（转发 gRPC） |
-| Index Price | `cmd/indexprice` | — | 占位，未实现 |
+| Index Price | `cmd/indexprice` | gRPC `:50054` | 多交易所指数价、Redis/Kafka、PostgreSQL 审计 |
 
 ```text
-Client ──REST──▶ Gateway ──gRPC──▶ Order / Market Data / Kline
+Client ──REST──▶ Gateway ──gRPC──▶ Order / Market Data / Kline / Index Price
 Client ──WS────▶ Push ◀── Redis Pub/Sub ◀── Market Data / Kline
                     ▲
               Kafka: order.commands → Matching → match/trade.events
@@ -66,7 +66,7 @@ docker compose -f deploy/docker-compose.yml up -d
 
 ### 4. 一键启动（推荐）
 
-按依赖顺序启动全部已实现服务（matching → order → marketdata → kline → push → gateway）：
+按依赖顺序启动全部已实现服务（matching → order → marketdata → kline → indexprice → push → gateway）：
 
 ```bash
 make build
@@ -106,6 +106,7 @@ make build
 | `./scripts/marketdata.sh` | 行情 |
 | `./scripts/kline.sh` | K 线 |
 | `./scripts/push.sh` | WebSocket 推送 |
+| `./scripts/indexprice.sh` | 指数价格 |
 | `./scripts/gateway.sh` | API 网关 |
 | `./scripts/auth.sh` | 服务 JWT 签发（dev，:8090） |
 
@@ -188,7 +189,3 @@ curl http://localhost/v1/health
 - **命令投递**：Order → Transactional Outbox → Kafka `order.commands`。
 - **行情/K 线**：消费 `trade.events` / `match.events`，内存聚合后写 Redis，Push 扇出 WS。
 - **账务真相**：PostgreSQL；Redis 仅缓存与推送，详见 [kafka-data.md](docs/kafka-data.md)、[redis-data.md](docs/redis-data.md)。
-
-## License
-
-内部项目；未指定开源协议前请勿对外分发。

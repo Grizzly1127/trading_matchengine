@@ -20,9 +20,9 @@
 | `balances:admin` | `POST /v1/balances` |
 | `market:read` | `GET /v1/klines` |
 | `push:connect` | WebSocket `/v1/ws` |
-| `push:ticker_all` | WS 订阅 `ticker@all` / `ticker@all:{quote}`（做市商） |
+| `push:ticker_all` | WS 订阅 `ticker@all` / `ticker@all:{quote}`；`GET /v1/market/ticker/all`（做市商） |
 
-`static` 模式放行全部 scope（含 `push:ticker_all`）。
+`static` 模式默认按 `configs/gateway.json` / `configs/push.json` 的 **`static_scopes`**（普通档位，**不含** `push:ticker_all`）。做市商联调使用 **`market_maker_static_token`**（含 `push:ticker_all`），或与 `cmd/auth` 的 `market-maker` 客户端签发 JWT 一致。
 
 Push 限流（`configs/push.json` → `limits`）：普通用户每 subject 默认最多 **5** 条连接、每连接最多 **50** 个 symbol 频道；做市商（含 `push:ticker_all`）每 subject 默认最多 **3** 条连接。
 

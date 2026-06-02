@@ -21,6 +21,10 @@
     "password": "",
     "db": 0
   },
+  "idempotency": {
+    "enabled": true,
+    "ttl_hours": 24
+  },
   "kafka": {
     "brokers": ["localhost:9092"],
     "command_topic": "order.commands",

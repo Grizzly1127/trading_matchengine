@@ -7,11 +7,13 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/handler"
 	gwmw "github.com/Grizzly1127/trading_matchengine/internal/gateway/middleware"
 	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
+	indexv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/index/v1"
 	klinev1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/kline/v1"
 	marketdatav1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/marketdata/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 )
 
@@ -23,6 +25,7 @@ type Deps struct {
 	Balance    orderv1.BalanceServiceClient
 	MarketData marketdatav1.MarketDataServiceClient
 	Kline      klinev1.KlineServiceClient
+	IndexPrice indexv1.IndexPriceServiceClient
 	Symbols    *symbolrules.Registry
 	Assets     *symbolrules.AssetRegistry
 }
@@ -66,10 +69,18 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/v1/balances/{asset}", balanceH.GetBalance)
 	})
 
+	indexPriceH := &handler.IndexPrice{IndexPrice: deps.IndexPrice, Log: deps.Log}
+	r.Get("/v1/index-price", indexPriceH.GetIndexPrice)
+
 	marketH := &handler.Market{MarketData: deps.MarketData, SymbolRules: deps.Symbols, AssetRules: deps.Assets, Log: deps.Log}
 	r.Get("/v1/market/depth", marketH.Depth)
 	r.Get("/v1/market/ticker", marketH.Ticker)
 	r.Get("/v1/market/symbols", marketH.Symbols)
+	r.Group(func(r chi.Router) {
+		r.Use(authenticate, gwmw.RequireScopes(auth.ScopePushTickerAll))
+		r.Use(middleware.Compress(5))
+		r.Get("/v1/market/ticker/all", marketH.TickerAll)
+	})
 
 	if deps.Kline != nil {
 		klineH := &handler.Kline{Client: deps.Kline, Log: deps.Log}

@@ -59,7 +59,7 @@ flowchart LR
 | `order.commands` | ✅ 已用 | 1 | `OrderCommandEnvelope` (protobuf) | Order Service（Outbox Relay） | Matching Engine |
 | `match.events` | ✅ 已用 | 1 | `MatchEvent` (protobuf) | Matching Engine | Order Service、Market Data Service |
 | `trade.events` | ✅ 已用 | 1 | `TradeEvent` (protobuf) | Matching Engine | Order Service、Market Data Service、Kline Service |
-| `kline.raw` | 📋 规划 | — | — | Kline（闭合通知，可选） | 推送/审计等 |
+| `kline.raw` | ✅ 已用 | 1 | `KlineClosedEvent` (protobuf) | Kline Service | 下游（审计/风控等，待接） |
 | `index.price` | ✅ | 1 | `IndexPriceEvent` (protobuf) | Index Price Service | 下游（合约标记价等，待接） |
 | `system.audit` | 📋 规划 | — | — | 各服务 | 审计 |
 
@@ -67,7 +67,7 @@ flowchart LR
 
 ```bash
 ./scripts/kafka-create-topics.sh
-# 等价于创建 order.commands / match.events / trade.events，各 1 分区
+# 等价于创建 order.commands / match.events / trade.events / index.price / kline.raw，各 1 分区
 ```
 
 生产目标（见 [architecture-spec.md §6.2](./architecture-spec.md#62-kafka事件总线)）：按 **symbol → shard → partition** 路由；`trade.events` 保留期更长、可多下游并行消费。
@@ -104,7 +104,7 @@ protoc --decode=matching.v1.TradeEvent \
 
 - `order.commands` / `match.events` / `trade.events`
 
-见：`configs/order.json`、`configs/matching.kafka.json`、`configs/marketdata.json`、`configs/kline.json`。
+见：`configs/order.json`、`configs/matching.kafka.json`、`configs/marketdata.json`、`configs/kline.json`（`kline_raw_topic`、`producer_enabled`）。
 
 ### 3.3 Offset 提交
 
@@ -386,9 +386,23 @@ sequenceDiagram
 
 | Topic | 用途 |
 |-------|------|
-| `kline.raw` | K 线 bar 闭合通知（当前 Kline 直接消费 `trade.events` + Redis/DB） |
-| `index.price` | 指数价格广播（Index Price Service 已实现） |
 | `system.audit` | 跨服务审计日志 |
+
+### 8.1 `kline.raw`（已实现）
+
+| 项 | 说明 |
+|----|------|
+| **生产者** | Kline Service，bar 落库并 Redis 闭合推送成功后发布 |
+| **消息体** | `kline.v1.KlineClosedEvent`（protobuf） |
+| **Key** | `symbol` |
+| **输入** | Kline 仍消费 `trade.events` 做 OHLCV 聚合；`kline.raw` 仅为闭合通知，非成交流 |
+
+解码示例：
+
+```bash
+protoc --decode=kline.v1.KlineClosedEvent \
+  -I proto proto/kline/v1/kline.proto < /tmp/kline_raw.bin
+```
 
 ---
 

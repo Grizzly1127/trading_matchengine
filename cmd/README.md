@@ -10,4 +10,4 @@
 | `push/` | 第 6 步 | WebSocket 推送（`/v1/ws`，默认 `:8081`） |
 | `marketdata/` | 第 6 步 | 行情服务 |
 | `kline/` | 第 6 步 | K 线服务 |
-| `indexprice/` | 规划中 | 指数价格（占位） |
+| `indexprice/` | 已实现 | 指数价格（gRPC `:50054`，Redis `index:{symbol}`） |

@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/aggregator"
+	klmetrics "github.com/Grizzly1127/trading_matchengine/internal/kline/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/kline/repository"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kline/bar"
@@ -21,11 +22,13 @@ const (
 
 // Worker 异步处理闭合 bar：落库、删 open 快照、推送。
 type Worker struct {
-	Repo   *repository.Repository
-	Pub    *publisher.RedisPublisher
-	Log    zerolog.Logger
-	ch     chan aggregator.ClosedEvent
-	closed chan struct{}
+	Repo    *repository.Repository
+	Pub     *publisher.RedisPublisher
+	Kafka   *publisher.KafkaPublisher
+	Metrics *klmetrics.Counters
+	Log     zerolog.Logger
+	ch      chan aggregator.ClosedEvent
+	closed  chan struct{}
 }
 
 // New 创建 Worker。
@@ -57,6 +60,9 @@ func (w *Worker) HandleClose(ctx context.Context, ev aggregator.ClosedEvent) {
 	select {
 	case w.ch <- ev:
 	default:
+		if w.Metrics != nil {
+			w.Metrics.CloseWorkerQueueFull.Add(1)
+		}
 		// 内存队列满时依赖 Redis pending 重放，不阻塞热路径。
 		w.Log.Warn().
 			Str("symbol", ev.Symbol).
@@ -179,6 +185,9 @@ func (w *Worker) processWithRetry(ctx context.Context, ev aggregator.ClosedEvent
 		}
 		return
 	}
+	if w.Metrics != nil {
+		w.Metrics.ClosedPersistFailures.Add(1)
+	}
 	w.Log.Error().Err(lastErr).
 		Str("symbol", ev.Symbol).
 		Str("interval", string(ev.Interval)).
@@ -194,9 +203,26 @@ func (w *Worker) processOne(ctx context.Context, ev aggregator.ClosedEvent) erro
 	if err := w.Repo.InsertClosed(ctx, rec); err != nil {
 		return err
 	}
+	if w.Metrics != nil {
+		w.Metrics.ClosedBarsPersisted.Add(1)
+	}
 	if w.Pub != nil {
 		if err := w.Pub.PublishClosed(ctx, ev.Symbol, ev.Interval, ev.Bar); err != nil {
+			if w.Metrics != nil {
+				w.Metrics.RedisPublishErrors.Add(1)
+			}
 			return err
+		}
+	}
+	if w.Kafka != nil {
+		if err := w.Kafka.PublishClosed(ctx, ev); err != nil {
+			if w.Metrics != nil {
+				w.Metrics.KafkaPublishErrors.Add(1)
+			}
+			return err
+		}
+		if w.Metrics != nil {
+			w.Metrics.KlineRawPublished.Add(1)
 		}
 	}
 	return nil

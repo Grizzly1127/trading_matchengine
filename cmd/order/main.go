@@ -19,6 +19,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/order/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/consumer"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/handler"
+	"github.com/Grizzly1127/trading_matchengine/internal/order/idempotency"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/marketdata"
 	matchengine "github.com/Grizzly1127/trading_matchengine/internal/order/matching"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/metrics"
@@ -111,6 +112,8 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 
+	var orderRedis *redis.Client
+
 	orderSvc := &service.OrderService{
 		Repo:           repo,
 		OutboxTopic:    cfg.Kafka.CommandTopic,
@@ -167,8 +170,13 @@ func main() {
 		if err := rdb.Ping(ctx); err != nil {
 			log.Fatal().Err(err).Str("redis_addr", cfg.Redis.Addr).Msg("order redis ping")
 		}
+		orderRedis = rdb
 		orderPush = orderpublisher.NewRedisPublisher(rdb)
 		log.Info().Str("redis_addr", cfg.Redis.Addr).Msg("order ws publisher enabled")
+	}
+	if cfg.Idempotency.Enabled && orderRedis != nil {
+		orderSvc.Idempotency = idempotency.NewRedisCache(orderRedis, time.Duration(cfg.Idempotency.TTLHours)*time.Hour)
+		log.Info().Int("ttl_hours", cfg.Idempotency.TTLHours).Msg("order idempotency redis cache enabled")
 	}
 
 	if cfg.Kafka.ConsumerEnabled {

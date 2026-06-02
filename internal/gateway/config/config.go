@@ -12,10 +12,11 @@ import (
 
 // Config 是 gateway 进程启动配置。
 type Config struct {
-	HTTPListen        string        `json:"http_listen"`
-	OrderService      ServiceConfig `json:"order_service"`
-	MarketDataService ServiceConfig `json:"marketdata_service"`
+	HTTPListen        string                      `json:"http_listen"`
+	OrderService      ServiceConfig               `json:"order_service"`
+	MarketDataService ServiceConfig               `json:"marketdata_service"`
 	KlineService      ServiceConfig               `json:"kline_service"`
+	IndexPriceService ServiceConfig               `json:"indexprice_service"`
 	SymbolsFile       string                      `json:"symbols_file"`
 	Symbols           map[string]SymbolRuleConfig `json:"symbols"`
 	Auth              auth.Config                 `json:"auth"`
@@ -84,6 +85,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	c.applyServiceDefaults(c.OrderService, "localhost:50051", 10)
 	c.applyServiceDefaults(c.MarketDataService, "localhost:50052", 10)
 	c.applyServiceDefaults(c.KlineService, "localhost:50053", 10)
+	c.applyServiceDefaults(c.IndexPriceService, "localhost:50054", 10)
 	c.applySymbolDefaults()
 
 	if strings.TrimSpace(c.Auth.Mode) == "" {

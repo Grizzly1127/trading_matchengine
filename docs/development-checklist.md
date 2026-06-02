@@ -119,8 +119,8 @@
 - [x] 多周期聚合、PostgreSQL `klines` 表
 - [x] Redis：`kline:open:*`、`kline:pending:close`、Pub/Sub `kline:{symbol}:{interval}`
 - [x] gRPC `GetKlines`；Gateway `GET /v1/klines`
-- [ ] Kline Service Prometheus 指标
-- [ ] Kafka Topic `kline.raw`（架构规划；当前直接消费 `trade.events`）
+- [x] Kline Service Prometheus 指标
+- [x] Kafka Topic `kline.raw`（闭合 bar 通知；仍消费 `trade.events` 聚合）
 
 ### 2.4 Index Price Service（6.4）
 
@@ -129,17 +129,17 @@
 - [x] Redis `index:{symbol}` + Pub/Sub；可选 Kafka `index.price`
 - [x] PostgreSQL 审计表；gRPC `GetIndexPrice`
 - [x] `scripts/indexprice.sh`、`configs/indexprice.json`
-- [ ] 纳入 `scripts/dev.sh` 一键启动
-- [ ] Gateway `GET /v1/index-price`
-- [ ] README 与路线图文档同步（勿再写「占位未实现」）
+- [x] 纳入 `scripts/dev.sh` 一键启动
+- [x] Gateway `GET /v1/index-price`
+- [x] README 与路线图文档同步（勿再写「占位未实现」）
 
 ### 2.5 全市场 Ticker / 做市商（6.5）
 
 - [x] Market Data：`GetTickerAllSnapshot`、Redis `ticker:all:{quote}`
 - [x] Push：支持订阅 `ticker@all` / `ticker@all:{quote}`
-- [ ] Gateway `GET /v1/market/ticker/all`（冷启动 REST）
-- [ ] WS snapshot + delta 帧格式与 rest-api §8.2 一致
-- [ ] 做市商 API Key 档位与普通用户隔离
+- [x] Gateway `GET /v1/market/ticker/all`（冷启动 REST）
+- [x] WS snapshot + delta 帧格式与 rest-api §8.2 一致
+- [x] 做市商 API Key 档位与普通用户隔离
 
 ### 2.6 Phase 2 架构验收项
 
@@ -149,12 +149,12 @@
 - [x] 客户端 WS 可收到 **指数价格**（需启动 indexprice）
 - [x] 客户端 WS 可收到 **公开市场成交**（`trade:{symbol}`）
 - [x] 客户端 WS 可收到 **用户订单**（`order`）
-- [ ] `ticker@all` 完整做市商体验（REST 快照 + WS delta）
+- [x] `ticker@all` 完整做市商体验（REST 快照 + WS delta）
 
 ### 2.7 推迟但相关的 Phase 2 项
 
-- [ ] 市价买单行情冻结方案 C 全量文档落地（见 `design/market-buy-freeze.md`，若仓库无此文件则先补设计）
-- [ ] Redis 下单幂等缓存（Phase 1 以 DB 唯一索引为准，可选）
+- [x] 市价买单行情冻结方案 C 全量文档落地（见 `design/market-buy-freeze.md`，若仓库无此文件则先补设计）
+- [x] Redis 下单幂等缓存（Phase 1 以 DB 唯一索引为准，可选）
 
 ---
 
@@ -221,7 +221,7 @@
 | PostgreSQL | 第 4 步 | [x] |
 | Redis | 第 6 步 / 可选幂等 | [x] |
 | Protobuf 全量 | 第 3～4 步渐进 | [x] 核心路径已用 proto |
-| `scripts/dev.sh` 一键启停 | 联调 | [x]（不含 indexprice） |
+| `scripts/dev.sh` 一键启停 | 联调 | [x]（含 indexprice） |
 | `scripts/reset-dev.sh` | 联调 | [x] |
 | `scripts/e2e-api.sh` | 联调 | [x] |
 | Nginx 统一入口 | 可选 | [x] `deploy/nginx/` |
@@ -237,7 +237,7 @@
 | `match.events` | [x] | |
 | `trade.events` | [x] | |
 | `index.price` | [x] | Index Price 可选发布 |
-| `kline.raw` | [ ] | 规划；Kline 直消费 trade |
+| `kline.raw` | [x] | Kline 闭合 bar 发布；输入仍 `trade.events` |
 | `system.audit` | [ ] | 规划 |
 | Redis `trade:{symbol}` | [x] | Market Data 发布 |
 | Redis `idempotent:order:*` | [ ] | 规划；DB 幂等已够用 |
@@ -251,7 +251,7 @@
 - [x] `docs/rest-api.md`、`docs/matching-api.md`、`docs/kafka-data.md`、`docs/redis-data.md`
 - [ ] `docs/gateway-development-plan.md`（路线图引用，仓库缺失）
 - [ ] `docs/market-push-development-plan.md`（路线图引用，仓库缺失）
-- [ ] `docs/design/market-buy-freeze.md`（路线图引用，需确认是否存在）
+- [x] `docs/design/market-buy-freeze.md`（路线图引用，需确认是否存在）
 - [ ] `README.md` Index Price 状态与实现一致
 - [ ] `docs/kafka-data.md` §8「未实现」与 `index.price` 现状对齐
 - [x] 本清单 `docs/development-checklist.md`
@@ -279,7 +279,7 @@
 ## 9. 建议实施顺序（摘自差距分析）
 
 1. **P0 — Phase 1 收尾**：架构 §5.6 启动对账、生产级 JWT/mTLS
-2. **P1 — Phase 2 对外补齐**：Gateway `ticker/all` + `index-price`、dev.sh 纳入 indexprice、`trade:` 推送、`ticker@all` 协议
+2. **P1 — Phase 2 对外补齐**：`trade:` 推送、`ticker@all` 协议（`index-price`、`ticker/all` 与 dev.sh 已接）
 3. **P2 — 架构约束**：Matching §5.6 启动对账、全服务 Prometheus、WS `order`
 4. **P3 — 生产化**：Shard Manager → K8s → Phase 4 安全与压测
 
