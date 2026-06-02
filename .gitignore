@@ -41,6 +41,7 @@ configs/dev-mtls/
 *.log.gz
 *.stdout
 *.stderr
+.cursor/
 
 # Proto generated (uncomment when using buf/protoc)
 # proto/**/*.pb.go
