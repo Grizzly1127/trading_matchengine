@@ -1,6 +1,6 @@
 # trading_matchengine
 
-虚拟货币交易所撮合引擎与服务集群（Go）。设计目标：**高性能 · 高可用 · 低延迟 · 高并发**（见 [docs/architecture-spec.md](docs/architecture-spec.md)）。
+虚拟货币交易所撮合引擎与服务集群（Go）。设计目标：**高性能 · 高可用 · 低延迟 · 高并发**。
 
 ## 服务一览
 
@@ -25,9 +25,6 @@ Client ──WS────▶ Push ◀── Redis Pub/Sub ◀── Market Dat
 
 | 文档 | 说明 |
 |------|------|
-| [docs/development-roadmap.md](docs/development-roadmap.md) | **开发顺序（建议从这里开始）** |
-| [docs/development-checklist.md](docs/development-checklist.md) | **开发清单**（已完成 `[x]` / 待办 `[ ]`） |
-| [docs/architecture-spec.md](docs/architecture-spec.md) | 架构与 SLA |
 | [docs/rest-api.md](docs/rest-api.md) | 对外 REST / WebSocket |
 | [docs/matching-api.md](docs/matching-api.md) | Matching（Kafka / JSONL / 配置） |
 | [docs/order-api.md](docs/order-api.md) | Order gRPC |
