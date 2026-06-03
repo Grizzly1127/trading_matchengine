@@ -1,6 +1,7 @@
 {
   "data_dir": "data",
   "shard_id": "shard-0",
+  "shards_file": "configs/shards.json",
   "snapshot_every": 10000,
   "snapshot_on_exit": true,
   "default_symbol": "BTC-USDT",

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/idempotency"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
+	"github.com/Grizzly1127/trading_matchengine/pkg/shardmgr"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
@@ -40,6 +41,12 @@ type OrderStore interface {
 	ListTrades(ctx context.Context, filter repository.ListTradesFilter) ([]repository.Trade, error)
 }
 
+// ShardRouter 发命令前分片路由检查（Shard Manager）。
+type ShardRouter interface {
+	AssertPlaceOrder(symbol string) error
+	AssertCancelOrder(symbol string) error
+}
+
 // OrderService 订单业务逻辑。
 type OrderService struct {
 	Repo           OrderStore
@@ -48,6 +55,7 @@ type OrderService struct {
 	Idempotency    *idempotency.RedisCache
 	SlippageBuffer decimal.Decimal
 	Symbols        *symbolrules.Registry
+	Shards         ShardRouter
 }
 
 func (s *OrderService) symbolRules(symbolName string) (symbolrules.Spec, error) {
@@ -134,6 +142,19 @@ func (s *OrderService) CancelOrder(ctx context.Context, req *orderv1.CancelOrder
 	}
 	if req.GetOrderId() == 0 {
 		return nil, fmt.Errorf("%w: order_id is required", ErrInvalidArgument)
+	}
+
+	existing, err := s.Repo.GetOrderByUser(ctx, req.GetUserId(), req.GetOrderId())
+	if err != nil {
+		if errors.Is(err, repository.ErrOrderNotFound) {
+			return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
+		}
+		return nil, err
+	}
+	if s.Shards != nil {
+		if err := s.Shards.AssertCancelOrder(existing.Symbol); err != nil {
+			return nil, shardPreconditionErr(err)
+		}
 	}
 
 	order, err := s.Repo.BeginCancel(ctx, req.GetUserId(), req.GetOrderId(), s.OutboxTopic)
@@ -361,6 +382,11 @@ func (s *OrderService) validatePlaceOrder(ctx context.Context, req *orderv1.Plac
 	if err != nil {
 		return repository.InsertPendingInput{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
+	if s.Shards != nil {
+		if err := s.Shards.AssertPlaceOrder(symbol); err != nil {
+			return repository.InsertPendingInput{}, shardPreconditionErr(err)
+		}
+	}
 
 	qtyStr := strings.TrimSpace(req.GetQuantity().GetValue())
 	qty, err := decimal.NewFromString(qtyStr)
@@ -456,6 +482,13 @@ func (s *OrderService) validatePlaceOrder(ctx context.Context, req *orderv1.Plac
 		FrozenAmount:   frozenAmountPtr,
 		Quantity:       qtyNorm,
 	}, nil
+}
+
+func shardPreconditionErr(err error) error {
+	if errors.Is(err, shardmgr.ErrSymbolNotMapped) {
+		return fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+	}
+	return fmt.Errorf("%w: %v", ErrFailedPrecondition, err)
 }
 
 func toPlaceOrderResponse(order *repository.Order, idempotentHit bool) *orderv1.PlaceOrderResponse {

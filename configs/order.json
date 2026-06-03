@@ -5,6 +5,7 @@
   "migrate_on_start": true,
   "default_symbol": "BTC-USDT",
   "symbols_file": "configs/symbols.json",
+  "shards_file": "configs/shards.json",
   "matching": {
     "enabled": true,
     "grpc_addr": "localhost:50061",

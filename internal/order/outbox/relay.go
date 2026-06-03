@@ -32,12 +32,19 @@ type KafkaWriter interface {
 	WriteAt(ctx context.Context, topic string, partition int, key, value []byte) error
 }
 
+// PartitionResolver 按 symbol（partition_key）解析 Kafka 分区；由 Shard Manager 实现。
+type PartitionResolver interface {
+	PartitionForSymbol(symbol string) (int, error)
+}
+
 // RelayConfig 控制后台投递行为。
 type RelayConfig struct {
 	PollInterval time.Duration
 	BatchSize    int
 	MaxRetry     int
-	Partition    int
+	// Partition 为未配置 Resolver 时的回退分区。
+	Partition int
+	Resolver  PartitionResolver
 }
 
 // Relay 轮询 order_outbox 并投递至 Kafka。
@@ -92,7 +99,11 @@ func (r *Relay) dispatchOne(ctx context.Context, cfg RelayConfig, e Entry) error
 		return fmt.Errorf("outbox %d exceeded max_retry=%d", e.ID, cfg.MaxRetry)
 	}
 
-	if err := r.Writer.WriteAt(ctx, e.Topic, cfg.Partition, []byte(e.PartitionKey), e.Payload); err != nil {
+	partition, err := r.resolvePartition(cfg, e.PartitionKey)
+	if err != nil {
+		return err
+	}
+	if err := r.Writer.WriteAt(ctx, e.Topic, partition, []byte(e.PartitionKey), e.Payload); err != nil {
 		if incErr := r.Store.IncrementRetry(ctx, e.ID); incErr != nil {
 			return fmt.Errorf("kafka write: %w; increment retry: %v", err, incErr)
 		}
@@ -103,6 +114,13 @@ func (r *Relay) dispatchOne(ctx context.Context, cfg RelayConfig, e Entry) error
 
 func isSendableStatus(status string) bool {
 	return status == "PENDING" || status == "CANCELING"
+}
+
+func (r *Relay) resolvePartition(cfg RelayConfig, partitionKey string) (int, error) {
+	if r != nil && cfg.Resolver != nil {
+		return cfg.Resolver.PartitionForSymbol(partitionKey)
+	}
+	return cfg.Partition, nil
 }
 
 func (r *Relay) normalizedConfig() RelayConfig {

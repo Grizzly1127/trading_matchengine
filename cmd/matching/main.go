@@ -20,6 +20,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/orderclient"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/shardbind"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
@@ -89,6 +90,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if _, err := shardbind.Apply(eng, cfg.ShardID, cfg.ShardsFile, symbolRegistry); err != nil {
+		log.Fatal().Err(err).Msg("shard bind")
+	}
 
 	if err := runRecoveryVerify(ctx, log, cfg, eng, symbolRegistry); err != nil {
 		log.Fatal().Err(err).Msg("recovery verify failed")

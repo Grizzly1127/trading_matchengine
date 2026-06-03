@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/order/service"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/Grizzly1127/trading_matchengine/pkg/shardmgr"
 	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -88,6 +90,15 @@ func main() {
 		log.Fatal().Err(err).Msg("symbol rules")
 	}
 
+	var shardMgr *shardmgr.Manager
+	if strings.TrimSpace(cfg.ShardsFile) != "" {
+		shardMgr, err = shardmgr.LoadFile(cfg.ShardsFile)
+		if err != nil {
+			log.Fatal().Err(err).Str("shards_file", cfg.ShardsFile).Msg("load shard manager")
+		}
+		log.Info().Str("shards_file", cfg.ShardsFile).Msg("shard manager loaded")
+	}
+
 	repo := repository.New(pool, rulesCfg.Assets)
 
 	var matchingClient *matchengine.Client
@@ -120,6 +131,7 @@ func main() {
 		MarketData:     mdClient,
 		SlippageBuffer: decimal.NewFromFloat(cfg.MarketData.SlippageBuffer),
 		Symbols:        rulesCfg.Registry,
+		Shards:         shardMgr,
 	}
 	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: orderSvc})
 	orderv1.RegisterOrderAdminServiceServer(grpcServer, &handler.AdminServer{Repo: repo})
@@ -140,11 +152,12 @@ func main() {
 		go startOrderMetricsCollector(ctx, log, repo, m)
 	}
 
+	relayCfg := outbox.RelayConfig{Partition: cfg.Kafka.Partition, Resolver: shardMgr}
 	relay := &outbox.Relay{
 		Store:  repo,
 		Writer: writer,
 		Log:    log.With().Str("component", "outbox_relay").Logger(),
-		Config: outbox.RelayConfig{Partition: cfg.Kafka.Partition},
+		Config: relayCfg,
 	}
 	go relay.Run(ctx)
 

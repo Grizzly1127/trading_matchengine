@@ -11,6 +11,7 @@ import (
 type Config struct {
 	DataDir        string      `json:"data_dir"`
 	ShardID        string      `json:"shard_id"`
+	ShardsFile     string      `json:"shards_file"`
 	SnapshotEvery  uint64      `json:"snapshot_every"`
 	SnapshotOnExit bool        `json:"snapshot_on_exit"`
 	CommandsFile   string      `json:"commands_file"`

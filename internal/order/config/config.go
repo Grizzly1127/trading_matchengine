@@ -15,6 +15,7 @@ type Config struct {
 	MigrateOnStart bool                        `json:"migrate_on_start"`
 	DefaultSymbol  string                      `json:"default_symbol"`
 	SymbolsFile    string                      `json:"symbols_file"`
+	ShardsFile     string                      `json:"shards_file"`
 	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
 	MarketData     MarketDataConfig            `json:"marketdata"`
 	Matching       MatchingConfig              `json:"matching"`

@@ -96,7 +96,7 @@ protoc --decode=matching.v1.TradeEvent \
 
 | 组件 | 行为 |
 |------|------|
-| **Order Outbox Relay** | 写入配置中的固定 `partition`（默认 `0`）；`partition_key` 存 `symbol`，与后续按 symbol 分片兼容 |
+| **Order Outbox Relay** | 通过 `configs/shards.json`（Shard Manager）按 `partition_key`（symbol）解析 `kafka_partition`；未配置 `shards_file` 时回退固定 `partition` |
 | **Matching 发布** | `Producer.Write(topic, key=symbol, value=proto)` |
 | **下游消费者** | 固定消费 `partition: 0`；`group_id` 各服务独立 |
 

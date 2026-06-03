@@ -149,3 +149,38 @@ func TestRelay_KafkaErrorIncrementsRetry(t *testing.T) {
 		t.Fatal("should not mark published on kafka failure")
 	}
 }
+
+type fakeResolver struct {
+	partition int
+	err       error
+}
+
+func (f *fakeResolver) PartitionForSymbol(string) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	return f.partition, nil
+}
+
+func TestRelay_dispatch_resolvesPartitionBySymbol(t *testing.T) {
+	store := &fakeStore{
+		entries: []Entry{{
+			ID: 1, AggregateID: 10, EventType: EventTypeNewOrder,
+			Payload: []byte("x"), Topic: "order.commands",
+			PartitionKey: "ETH-USDT",
+		}},
+		statusByID: map[uint64]string{10: "PENDING"},
+	}
+	writer := &fakeWriter{}
+	relay := &Relay{
+		Store:  store,
+		Writer: writer,
+		Config: RelayConfig{Partition: 0, MaxRetry: 3, Resolver: &fakeResolver{partition: 3}},
+	}
+	if err := relay.dispatchOne(context.Background(), relay.normalizedConfig(), store.entries[0]); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.writes) != 1 || writer.writes[0].partition != 3 {
+		t.Fatalf("partition=%d want 3", writer.writes[0].partition)
+	}
+}
