@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  labels:
+    app.kubernetes.io/component: gateway
+data:
+  gateway.json: |
+    {
+      "http_listen": ":8080",
+      "order_service": { "grpc_addr": "order:50051", "dial_seconds": 10 },
+      "marketdata_service": { "grpc_addr": "marketdata:50052", "dial_seconds": 10 },
+      "kline_service": { "grpc_addr": "kline:50053", "dial_seconds": 10 },
+      "indexprice_service": { "grpc_addr": "indexprice:50054", "dial_seconds": 10 },
+      "symbols_file": "/app/config/symbols.json",
+      "auth": {
+        "mode": "static",
+        "static_token": "dev-token-change-me",
+        "static_scopes": ["orders:read", "orders:write", "balances:read", "balances:admin", "market:read", "push:connect"]
+      },
+      "tls": { "enabled": false },
+      "log": { "level": "info", "dev": false }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: gateway
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: gateway
+          image: trading/gateway:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/app/config/gateway.json"]
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/gateway.json
+              subPath: gateway.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/symbols.json
+              subPath: symbols.json
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: gateway-config
+        - name: shared-config
+          configMap:
+            name: trading-shared

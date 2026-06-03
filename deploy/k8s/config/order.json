@@ -1,0 +1,51 @@
+{
+  "grpc_listen": ":50051",
+  "metrics_listen": ":9104",
+  "database_url": "postgres://trading:trading@postgres:5432/trading?sslmode=disable",
+  "migrate_on_start": true,
+  "default_symbol": "BTC-USDT",
+  "symbols_file": "/app/config/symbols.json",
+  "shards_file": "/app/config/shards.json",
+  "matching": {
+    "enabled": true,
+    "grpc_addr": "matching-shard-0:50061",
+    "dial_timeout_seconds": 3
+  },
+  "marketdata": {
+    "grpc_addr": "marketdata:50052",
+    "dial_timeout_seconds": 3,
+    "request_timeout_seconds": 1,
+    "slippage_buffer": 0.005
+  },
+  "redis": {
+    "addr": "redis:6379",
+    "password": "",
+    "db": 0
+  },
+  "idempotency": {
+    "enabled": true,
+    "ttl_hours": 24
+  },
+  "kafka": {
+    "brokers": ["kafka:9092"],
+    "command_topic": "order.commands",
+    "match_topic": "match.events",
+    "trade_topic": "trade.events",
+    "group_id": "order-service",
+    "partition": 0,
+    "consumer_enabled": true,
+    "consumer_start_offset": -1
+  },
+  "reconciler": {
+    "enabled": true,
+    "interval_seconds": 60,
+    "batch_size": 50,
+    "pending_accept_timeout_seconds": 60,
+    "cancel_confirm_timeout_seconds": 30,
+    "outbox_stale_warn_seconds": 30
+  },
+  "log": {
+    "level": "info",
+    "dev": false
+  }
+}

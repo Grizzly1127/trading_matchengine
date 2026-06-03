@@ -1,7 +1,9 @@
 MODULE := github.com/tradingmatchengine/trading_matchengine
 BIN_DIR := bin
 
-.PHONY: help test test-race cover lint tidy build clean migrate-up gen-proto
+.PHONY: help test test-race cover lint tidy build clean migrate-up gen-proto \
+	docker-build docker-build-matching docker-build-order docker-build-gateway \
+	helm-template kustomize-build
 
 gen-proto:
 	@bash scripts/gen-proto.sh
@@ -79,6 +81,29 @@ build-indexprice: gen-proto
 
 clean:
 	rm -rf $(BIN_DIR) coverage.txt coverage.html
+
+# --- Docker（deploy/docker/Dockerfile.*）---
+DOCKER_SERVICES := matching order gateway auth push marketdata kline indexprice
+
+docker-build-matching:
+	docker build -f deploy/docker/Dockerfile.matching -t trading/matching:dev .
+
+docker-build-order:
+	docker build -f deploy/docker/Dockerfile.order -t trading/order:dev .
+
+docker-build-gateway:
+	docker build -f deploy/docker/Dockerfile.gateway -t trading/gateway:dev .
+
+docker-build: docker-build-matching docker-build-order docker-build-gateway
+	@for s in auth push marketdata kline indexprice; do \
+		docker build -f deploy/docker/Dockerfile.$$s -t trading/$$s:dev .; \
+	done
+
+helm-template:
+	helm template trading deploy/k8s/helm/trading-engine -n trading
+
+kustomize-build:
+	kubectl kustomize deploy/k8s/manifests
 
 migrate-up:
 	@bash scripts/migrate-up.sh

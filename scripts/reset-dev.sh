@@ -258,6 +258,9 @@ reset_kafka() {
     die "kafka 容器未运行，请先: docker compose -f deploy/docker-compose.yml up -d kafka"
   fi
 
+  # 先删 consumer group，再删 topic（topic 先删会导致 __consumer_offsets 元数据失效，--delete --group 报 GroupIdNotFound）
+  reset_kafka_consumer_groups "$cid"
+
   local topic
   for topic in "${KAFKA_TOPICS[@]}"; do
     if docker exec "$cid" /opt/kafka/bin/kafka-topics.sh \
@@ -272,9 +275,8 @@ reset_kafka() {
     fi
   done
 
-  # 等待删除完成（Kafka 删除为异步）
+  # 等待 topic 删除完成（Kafka 删除为异步）
   sleep 2
-  reset_kafka_consumer_groups "$cid"
 }
 
 reset_kafka_consumer_groups() {
@@ -288,13 +290,23 @@ reset_kafka_consumer_groups() {
   log ">>> 删除 Kafka consumer groups"
   local group
   for group in "${KAFKA_CONSUMER_GROUPS[@]}"; do
-    if docker exec "$cid" /opt/kafka/bin/kafka-consumer-groups.sh \
+    if ! docker exec "$cid" /opt/kafka/bin/kafka-consumer-groups.sh \
       --bootstrap-server localhost:9092 \
       --describe --group "$group" >/dev/null 2>&1; then
-      log "删除 consumer group: $group"
-      docker exec "$cid" /opt/kafka/bin/kafka-consumer-groups.sh \
-        --bootstrap-server localhost:9092 \
-        --delete --group "$group" || true
+      log "consumer group 不存在，跳过: $group"
+      continue
+    fi
+    log "删除 consumer group: $group"
+    local out
+    if out="$(docker exec "$cid" /opt/kafka/bin/kafka-consumer-groups.sh \
+      --bootstrap-server localhost:9092 \
+      --delete --group "$group" 2>&1)"; then
+      continue
+    fi
+    if echo "$out" | grep -q 'GroupIdNotFoundException'; then
+      log "consumer group 已不存在（可忽略）: $group"
+    else
+      log "警告: 删除 consumer group 失败: $group — $out"
     fi
   done
 }

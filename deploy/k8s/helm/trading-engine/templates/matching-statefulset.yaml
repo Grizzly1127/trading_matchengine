@@ -1,0 +1,148 @@
+{{- if .Values.matching.enabled }}
+{{- range .Values.matching.shards }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: matching-{{ .shardId }}
+  namespace: {{ include "trading.namespace" $ }}
+  labels:
+    {{- include "trading.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: matching
+    trading.shard_id: {{ .shardId | quote }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "trading.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: matching
+    trading.shard_id: {{ .shardId | quote }}
+  ports:
+    - name: admin-grpc
+      port: 50061
+      targetPort: admin-grpc
+    - name: metrics
+      port: 9101
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: matching-{{ .shardId }}
+  namespace: {{ include "trading.namespace" $ }}
+  labels:
+    {{- include "trading.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: matching
+    trading.shard_id: {{ .shardId | quote }}
+spec:
+  serviceName: matching-{{ .shardId }}
+  replicas: 1
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "trading.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: matching
+      trading.shard_id: {{ .shardId | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "trading.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: matching
+        trading.shard_id: {{ .shardId | quote }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: matching
+          image: {{ include "trading.image" (dict "repo" $.Values.matching.image "tag" $.Values.global.imageTag "Values" $.Values) }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          args:
+            - "-config"
+            - "/app/config/matching.json"
+          ports:
+            - name: admin-grpc
+              containerPort: 50061
+            - name: metrics
+              containerPort: 9101
+          env:
+            - name: SHARD_ID
+              value: {{ .shardId | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /app/config/matching.json
+              subPath: matching.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/symbols.json
+              subPath: symbols.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/shards.json
+              subPath: shards.json
+              readOnly: true
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: config
+          configMap:
+            name: matching-{{ .shardId }}-config
+        - name: shared-config
+          configMap:
+            name: {{ include "trading.fullname" $ }}-shared
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/component: matching
+          trading.shard_id: {{ .shardId | quote }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $.Values.matching.storageClassName }}
+        storageClassName: {{ $.Values.matching.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .storageSize }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: matching-{{ .shardId }}-config
+  namespace: {{ include "trading.namespace" $ }}
+  labels:
+    {{- include "trading.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: matching
+    trading.shard_id: {{ .shardId | quote }}
+data:
+  matching.json: |
+{{- $path := printf "files/matching-%s.json" .shardId }}
+{{- if $.Files.Get $path }}
+{{- $.Files.Get $path | nindent 4 }}
+{{- else }}
+{{- $.Files.Get "files/matching-shard-0.json" | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

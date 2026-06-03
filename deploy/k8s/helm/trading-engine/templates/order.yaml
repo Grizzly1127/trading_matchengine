@@ -1,0 +1,102 @@
+{{- if .Values.order.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: {{ include "trading.namespace" . }}
+  labels:
+    {{- include "trading.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "trading.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+    - name: metrics
+      port: 9104
+      targetPort: metrics
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-config
+  namespace: {{ include "trading.namespace" . }}
+  labels:
+    {{- include "trading.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+data:
+  order.json: |
+{{- .Files.Get "files/order.json" | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: {{ include "trading.namespace" . }}
+  labels:
+    {{- include "trading.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+spec:
+  replicas: {{ .Values.order.replicas }}
+  selector:
+    matchLabels:
+      {{- include "trading.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: order
+  template:
+    metadata:
+      labels:
+        {{- include "trading.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: order
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: order
+          image: {{ include "trading.image" (dict "repo" .Values.order.image "tag" .Values.global.imageTag "Values" .Values) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - "-config"
+            - "/app/config/order.json"
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: metrics
+              containerPort: 9104
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/order.json
+              subPath: order.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/symbols.json
+              subPath: symbols.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/shards.json
+              subPath: shards.json
+              readOnly: true
+          resources:
+            {{- toYaml .Values.order.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: order-config
+        - name: shared-config
+          configMap:
+            name: {{ include "trading.fullname" . }}-shared
+{{- end }}

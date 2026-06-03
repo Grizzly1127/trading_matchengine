@@ -169,9 +169,9 @@
 
 ### 3.2 部署与中间件
 
-- [ ] Matching Engine K8s **StatefulSet** + PVC
-- [ ] 各服务 `deploy/docker/Dockerfile.*`
-- [ ] `deploy/k8s/` Helm / manifests
+- [x] Matching Engine K8s **StatefulSet** + PVC
+- [x] 各服务 `deploy/docker/Dockerfile.*`
+- [x] `deploy/k8s/` Helm / manifests
 - [ ] PostgreSQL 主从 + pgbouncer
 - [ ] Redis Cluster
 - [ ] Kafka 3 副本

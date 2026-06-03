@@ -1,0 +1,11 @@
+{
+  "shards": [
+    {
+      "shard_id": "shard-0",
+      "kafka_partition": 0,
+      "node": "matching-shard-0-0",
+      "tier": "shared",
+      "symbols": ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
+    }
+  ]
+}

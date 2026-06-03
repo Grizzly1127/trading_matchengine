@@ -1,0 +1,10 @@
+apiVersion: v2
+name: trading-engine
+description: 虚拟货币交易所撮合引擎 — 应用服务 Helm Chart（Matching StatefulSet + 无状态服务 Deployment）
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - matching-engine
+  - trading
+maintainers: []

@@ -1,0 +1,26 @@
+交易引擎已安装到命名空间: {{ include "trading.namespace" . }}
+
+{{- if .Values.matching.enabled }}
+Matching（StatefulSet + PVC）:
+{{- range .Values.matching.shards }}
+  - matching-{{ .shardId }} （Kafka partition {{ .kafkaPartition }}，PVC 模板 data）
+{{- end }}
+  Admin gRPC: matching-<shardId>:50061
+  Metrics:    matching-<shardId>:9101/metrics
+{{- end }}
+
+{{- if .Values.order.enabled }}
+Order:  order:50051
+{{- end }}
+
+{{- if .Values.gateway.enabled }}
+Gateway: gateway:{{ .Values.gateway.service.port }}
+{{- end }}
+
+前置依赖（需自行部署或使用 compose）:
+  - Kafka:  {{ join "," .Values.kafka.brokers }}
+  - Postgres / Redis（见 values.yaml）
+
+验收 Pod 重启:
+  kubectl delete pod -n {{ include "trading.namespace" . }} matching-shard-0-0
+  # 观察 WAL/快照从 PVC 恢复，目标 <30s

@@ -1,0 +1,85 @@
+# 默认面向集群内已有 kafka / postgres / redis（见 deploy/docker-compose 或 infra Helm）。
+# 安装：helm upgrade --install trading deploy/k8s/helm/trading-engine -n trading --create-namespace
+
+global:
+  namespace: trading
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  imageTag: dev
+
+kafka:
+  brokers:
+    - "kafka:9092"
+
+postgres:
+  url: "postgres://trading:trading@postgres:5432/trading?sslmode=disable"
+
+redis:
+  addr: "redis:6379"
+  password: ""
+
+# 每个 shard 一个 StatefulSet + 独立 PVC（架构 §6.4）
+matching:
+  enabled: true
+  image: matching
+  storageClassName: "" # 空则使用集群默认；生产建议 local-ssd / 低延迟云盘
+  shards:
+    - shardId: shard-0
+      kafkaPartition: 0
+      storageSize: 50Gi
+      resources:
+        requests:
+          cpu: "500m"
+          memory: 512Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+
+order:
+  enabled: true
+  image: order
+  replicas: 2
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+gateway:
+  enabled: true
+  image: gateway
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+
+marketdata:
+  enabled: false
+  image: marketdata
+  replicas: 1
+
+kline:
+  enabled: false
+  image: kline
+  replicas: 1
+
+indexprice:
+  enabled: false
+  image: indexprice
+  replicas: 1
+
+push:
+  enabled: false
+  image: push
+  replicas: 1
+
+auth:
+  enabled: false
+  image: auth
+  replicas: 1

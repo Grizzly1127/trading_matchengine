@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: trading
+
+resources:
+  - namespace.yaml
+  - matching/statefulset-shard-0.yaml
+  - order/deployment.yaml
+  - order/service.yaml
+  - gateway/deployment.yaml
+  - gateway/service.yaml
+
+configMapGenerator:
+  - name: trading-shared
+    files:
+      - symbols.json=config/symbols.json
+      - shards.json=config/shards.json
+    options:
+      disableNameSuffixHash: true
+
+images:
+  - name: trading/matching
+    newName: trading/matching
+    newTag: dev
+  - name: trading/order
+    newName: trading/order
+    newTag: dev
+  - name: trading/gateway
+    newName: trading/gateway
+    newTag: dev

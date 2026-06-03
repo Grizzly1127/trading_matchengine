@@ -1,0 +1,39 @@
+{
+  "http_listen": ":8080",
+  "order_service": {
+    "grpc_addr": "order:50051",
+    "dial_seconds": 10
+  },
+  "marketdata_service": {
+    "grpc_addr": "marketdata:50052",
+    "dial_seconds": 10
+  },
+  "kline_service": {
+    "grpc_addr": "kline:50053",
+    "dial_seconds": 10
+  },
+  "indexprice_service": {
+    "grpc_addr": "indexprice:50054",
+    "dial_seconds": 10
+  },
+  "symbols_file": "/app/config/symbols.json",
+  "auth": {
+    "mode": "static",
+    "static_token": "dev-token-change-me",
+    "static_scopes": [
+      "orders:read",
+      "orders:write",
+      "balances:read",
+      "balances:admin",
+      "market:read",
+      "push:connect"
+    ]
+  },
+  "tls": {
+    "enabled": false
+  },
+  "log": {
+    "level": "info",
+    "dev": false
+  }
+}

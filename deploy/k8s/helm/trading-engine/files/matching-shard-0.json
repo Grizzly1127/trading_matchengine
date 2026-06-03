@@ -1,0 +1,30 @@
+{
+  "data_dir": "/data",
+  "shard_id": "shard-0",
+  "shards_file": "/app/config/shards.json",
+  "snapshot_every": 10000,
+  "snapshot_on_exit": true,
+  "default_symbol": "BTC-USDT",
+  "symbols_file": "/app/config/symbols.json",
+  "metrics_listen": ":9101",
+  "admin_grpc_listen": ":50061",
+  "order_service": {
+    "enabled": true,
+    "grpc_addr": "order:50051",
+    "dial_timeout_seconds": 3,
+    "recovery_verify_timeout_seconds": 30
+  },
+  "kafka": {
+    "enabled": true,
+    "brokers": ["kafka:9092"],
+    "group_id": "matching-shard-0",
+    "command_topic": "order.commands",
+    "match_topic": "match.events",
+    "trade_topic": "trade.events",
+    "partition": 0
+  },
+  "log": {
+    "level": "info",
+    "dev": false
+  }
+}

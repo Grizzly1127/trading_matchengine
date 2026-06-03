@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-config
+  labels:
+    app.kubernetes.io/component: order
+data:
+  order.json: |
+    {
+      "grpc_listen": ":50051",
+      "metrics_listen": ":9104",
+      "database_url": "postgres://trading:trading@postgres:5432/trading?sslmode=disable",
+      "migrate_on_start": true,
+      "default_symbol": "BTC-USDT",
+      "symbols_file": "/app/config/symbols.json",
+      "shards_file": "/app/config/shards.json",
+      "matching": {
+        "enabled": true,
+        "grpc_addr": "matching-shard-0:50061",
+        "dial_timeout_seconds": 3
+      },
+      "marketdata": {
+        "grpc_addr": "marketdata:50052",
+        "dial_timeout_seconds": 3,
+        "request_timeout_seconds": 1,
+        "slippage_buffer": 0.005
+      },
+      "redis": { "addr": "redis:6379", "password": "", "db": 0 },
+      "idempotency": { "enabled": true, "ttl_hours": 24 },
+      "kafka": {
+        "brokers": ["kafka:9092"],
+        "command_topic": "order.commands",
+        "match_topic": "match.events",
+        "trade_topic": "trade.events",
+        "group_id": "order-service",
+        "partition": 0,
+        "consumer_enabled": true,
+        "consumer_start_offset": -1
+      },
+      "reconciler": {
+        "enabled": true,
+        "interval_seconds": 60,
+        "batch_size": 50,
+        "pending_accept_timeout_seconds": 60,
+        "cancel_confirm_timeout_seconds": 30,
+        "outbox_stale_warn_seconds": 30
+      },
+      "log": { "level": "info", "dev": false }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  labels:
+    app.kubernetes.io/component: order
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: order
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: order
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: order
+          image: trading/order:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/app/config/order.json"]
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: metrics
+              containerPort: 9104
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/order.json
+              subPath: order.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/symbols.json
+              subPath: symbols.json
+              readOnly: true
+            - name: shared-config
+              mountPath: /app/config/shards.json
+              subPath: shards.json
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: order-config
+        - name: shared-config
+          configMap:
+            name: trading-shared

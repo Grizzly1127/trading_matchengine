@@ -1,0 +1,14 @@
+.git
+.gitignore
+.cursor
+bin/
+coverage.txt
+coverage.html
+data/
+logs/
+*.log
+deploy/k8s/
+docs/
+**/*_test.go
+**/*.md
+!deploy/docker/README.md
