@@ -5,27 +5,37 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
+
+// WALGroupCommitConfig WAL 组提交
+type WALGroupCommitConfig struct {
+	SyncEveryRecords    int `json:"sync_every_records"`     // <=1：每条 fsync（默认）
+	SyncIntervalMs      int `json:"sync_interval_ms"`       // 与 sync_every_records>1 配合
+	ConsumerBatchMax    int `json:"consumer_batch_max"`     // Kafka 凑批上限，0=与 sync_every_records 对齐
+	ConsumerBatchWaitMs int `json:"consumer_batch_wait_ms"` // 凑批最长等待毫秒
+}
 
 // Config 是 matching 进程启动配置。
 type Config struct {
-	DataDir        string      `json:"data_dir"`
-	ShardID        string      `json:"shard_id"`
-	ShardsFile     string      `json:"shards_file"`
-	SnapshotEvery  uint64      `json:"snapshot_every"`
-	SnapshotOnExit bool        `json:"snapshot_on_exit"`
-	CommandsFile   string      `json:"commands_file"`
-	DefaultSymbol  string                      `json:"default_symbol"`
-	SymbolsFile    string                      `json:"symbols_file"`
-	Symbols        map[string]SymbolRuleConfig `json:"symbols"`
-	MetricsListen   string          `json:"metrics_listen"`
-	AdminGRPCListen string          `json:"admin_grpc_listen"`
-	OrderService    OrderServiceConfig `json:"order_service"`
-	Kafka           KafkaConfig     `json:"kafka"`
-	Log            LogConfig   `json:"log"`
+	DataDir         string                      `json:"data_dir"`
+	ShardID         string                      `json:"shard_id"`
+	ShardsFile      string                      `json:"shards_file"`
+	SnapshotEvery   uint64                      `json:"snapshot_every"`
+	SnapshotOnExit  bool                        `json:"snapshot_on_exit"`
+	WALGroupCommit  WALGroupCommitConfig        `json:"wal_group_commit"`
+	CommandsFile    string                      `json:"commands_file"`
+	DefaultSymbol   string                      `json:"default_symbol"`
+	SymbolsFile     string                      `json:"symbols_file"`
+	Symbols         map[string]SymbolRuleConfig `json:"symbols"`
+	MetricsListen   string                      `json:"metrics_listen"`
+	AdminGRPCListen string                      `json:"admin_grpc_listen"`
+	OrderService    OrderServiceConfig          `json:"order_service"`
+	Kafka           KafkaConfig                 `json:"kafka"`
+	Log             LogConfig                   `json:"log"`
 }
 
-// OrderServiceConfig 启动对账用 Order Admin gRPC（§5.6）。
+// OrderServiceConfig 启动对账用 Order Admin gRPC。
 type OrderServiceConfig struct {
 	Enabled                      bool   `json:"enabled"`
 	GRPCAddr                     string `json:"grpc_addr"`
@@ -33,7 +43,7 @@ type OrderServiceConfig struct {
 	RecoveryVerifyTimeoutSeconds int    `json:"recovery_verify_timeout_seconds"`
 }
 
-// KafkaConfig 控制 Kafka 消费与发布（3.2）。
+// KafkaConfig 控制 Kafka 消费与发布。
 type KafkaConfig struct {
 	Enabled      bool     `json:"enabled"`
 	Brokers      []string `json:"brokers"`
@@ -121,6 +131,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		}
 	}
 	c.applyKafkaDefaults(raw)
+	c.applyWALGroupCommitDefaults(raw)
 	c.applyOrderServiceDefaults(raw)
 	c.applySymbolDefaults()
 	if c.Log.Level == "" {
@@ -206,6 +217,39 @@ func (c *Config) applyOrderServiceDefaults(raw map[string]json.RawMessage) {
 	if c.OrderService.RecoveryVerifyTimeoutSeconds <= 0 {
 		c.OrderService.RecoveryVerifyTimeoutSeconds = 30
 	}
+}
+
+func (c *Config) applyWALGroupCommitDefaults(raw map[string]json.RawMessage) {
+	if c.WALGroupCommit.SyncEveryRecords <= 0 {
+		c.WALGroupCommit.SyncEveryRecords = 1
+	}
+	if c.WALGroupCommit.GroupCommitEnabled() {
+		if c.WALGroupCommit.ConsumerBatchMax <= 0 {
+			c.WALGroupCommit.ConsumerBatchMax = c.WALGroupCommit.SyncEveryRecords
+		}
+		if c.WALGroupCommit.ConsumerBatchWaitMs <= 0 {
+			c.WALGroupCommit.ConsumerBatchWaitMs = 2
+		}
+	}
+	_ = raw
+}
+
+// GroupCommitEnabled 是否启用 WAL 组提交。
+func (c WALGroupCommitConfig) GroupCommitEnabled() bool {
+	return c.SyncEveryRecords > 1 || c.SyncIntervalMs > 0
+}
+
+// ConsumerRunOptions 转为 consumer.RunOptions。
+func (c WALGroupCommitConfig) ConsumerRunOptions() (batchMax int, batchWait time.Duration) {
+	batchMax = 1
+	if !c.GroupCommitEnabled() {
+		return batchMax, 0
+	}
+	batchMax = c.ConsumerBatchMax
+	if batchMax <= 0 {
+		batchMax = c.SyncEveryRecords
+	}
+	return batchMax, time.Duration(c.ConsumerBatchWaitMs) * time.Millisecond
 }
 
 func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {

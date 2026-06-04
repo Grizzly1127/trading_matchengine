@@ -20,20 +20,20 @@ const benchKafkaBatch = 256
 
 func main() {
 	var (
-		brokers    = flag.String("brokers", "localhost:9092", "Kafka brokers，逗号分隔")
-		topic      = flag.String("topic", "order.commands", "命令 topic")
-		partition  = flag.Int("partition", 0, "目标分区（与 shard kafka_partition 一致）")
-		symbol     = flag.String("symbol", "BTC-USDT", "交易对")
-		scenario   = flag.String("scenario", "m3", "负载场景: seed|m1|m2|m3|m4")
-		rate       = flag.Int("rate", 5000, "目标发送速率（条/秒），seed 场景忽略")
-		duration   = flag.Duration("duration", 5*time.Minute, "压测时长（seed/warmup 忽略）")
-		warmup     = flag.Uint64("warmup", 0, "正式计时前预热条数（不计入统计）")
-		startID    = flag.Uint64("start-order-id", 1_000_000_000, "起始 order_id / command_id")
-		seedDepth  = flag.Int("seed-depth", 5000, "seed 场景卖盘档位数")
-		price      = flag.String("price", "65000", "限价价格（交叉价）")
-		restPrice  = flag.String("rest-price", "64000", "非交叉限价（m1/m3 挂单）")
-		qty        = flag.String("qty", "0.001", "每单数量")
-		prefix     = flag.String("client-prefix", "bench", "client_order_id 前缀")
+		brokers   = flag.String("brokers", "localhost:9092", "Kafka brokers，逗号分隔")
+		topic     = flag.String("topic", "order.commands", "命令 topic")
+		partition = flag.Int("partition", 0, "目标分区（与 shard kafka_partition 一致）")
+		symbol    = flag.String("symbol", "BTC-USDT", "交易对")
+		scenario  = flag.String("scenario", "m3", "负载场景: seed|m1|m2|m3|m4")
+		rate      = flag.Int("rate", 5000, "目标发送速率（条/秒），seed 场景忽略")
+		duration  = flag.Duration("duration", 5*time.Minute, "压测时长（seed/warmup 忽略）")
+		warmup    = flag.Uint64("warmup", 0, "正式计时前预热条数（不计入统计）")
+		startID   = flag.Uint64("start-order-id", 1_000_000_000, "起始 order_id / command_id")
+		seedDepth = flag.Int("seed-depth", 5000, "seed 场景卖盘档位数")
+		price     = flag.String("price", "65000", "限价价格（交叉价）")
+		restPrice = flag.String("rest-price", "64000", "非交叉限价（m1/m3 挂单）")
+		qty       = flag.String("qty", "0.001", "每单数量")
+		prefix    = flag.String("client-prefix", "bench", "client_order_id 前缀")
 	)
 	flag.Parse()
 
@@ -86,7 +86,7 @@ func newBenchWriter(brokers []string) *kafka.EventWriter {
 		Brokers:      brokers,
 		RequiredAcks: kafkago.RequireOne,
 		BatchSize:    benchKafkaBatch,
-		BatchTimeout: 5 * time.Millisecond,
+		BatchTimeout: 2 * time.Millisecond,
 	})
 }
 
@@ -109,7 +109,7 @@ func runSeed(ctx context.Context, w *kafka.EventWriter, topic string, partition 
 		body, err := benchutil.MarshalNewOrderEnvelope(benchutil.NewOrderParams{
 			CommandID: id, OrderID: id,
 			ClientOrderID: benchutil.ClientOrderID(prefix+"-seed", id),
-			Symbol: symbol, Side: commonv1.Side_SIDE_SELL,
+			Symbol:        symbol, Side: commonv1.Side_SIDE_SELL,
 			Price: crossPrice, Quantity: qty,
 			Partition: uint32(partition),
 		})
@@ -207,90 +207,112 @@ func (b *commandBuffer) flush() error {
 	return nil
 }
 
-func (b *commandBuffer) appendBuy(symbol, price, qty, prefix string, id uint64, partition int) error {
-	body, err := marshalBuy(symbol, price, qty, prefix, id, partition)
-	if err != nil {
-		return err
-	}
-	return b.append(body)
-}
-
 func runScenario(ctx context.Context, w *kafka.EventWriter, topic string, partition int, scenario, symbol, crossPrice, restPrice, qty, prefix string, startID uint64, rate int, duration time.Duration) (int, error) {
 	if rate <= 0 {
 		return 0, fmt.Errorf("rate must be > 0")
 	}
-	buf := newCommandBuffer(w, topic, partition, symbol, 64)
-	interval := time.Second / time.Duration(rate)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	deadline := time.Now().Add(duration)
+	pipe := newKafkaSendPipeline(w, topic, partition, symbol, queueCapForRate(rate), benchKafkaBatch)
+	defer func() {
+		if err := pipe.closeAndWait(); err != nil {
+			log.Printf("pipeline flush: %v", err)
+		}
+	}()
+
+	start := time.Now()
+	deadline := start.Add(duration)
 	var seq uint64
 	var sent int
 	var lastRestID uint64
 
-	flush := func() error {
-		return buf.flush()
-	}
-
 	for {
+		if err := pipe.firstErr(); err != nil {
+			return sent, err
+		}
 		select {
 		case <-ctx.Done():
-			_ = flush()
 			return sent, ctx.Err()
 		default:
 		}
-		if time.Now().After(deadline) {
-			if err := flush(); err != nil {
-				return sent, err
-			}
+		if !time.Now().Before(deadline) {
 			return sent, nil
 		}
-		<-ticker.C
+		if sent > 0 {
+			nextAt := start.Add(time.Duration(sent) * time.Second / time.Duration(rate))
+			if wait := time.Until(nextAt); wait > 0 {
+				timer := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return sent, ctx.Err()
+				case <-timer.C:
+				}
+			}
+		}
+
 		id := startID + seq
 		seq++
-
-		var err error
-		switch scenario {
-		case "m1":
-			err = buf.appendBuy(symbol, restPrice, qty, prefix, id, partition)
-		case "m2":
-			err = buf.appendBuy(symbol, crossPrice, qty, prefix, id, partition)
-		case "m3":
-			if seq%10 < 7 {
-				err = buf.appendBuy(symbol, crossPrice, qty, prefix, id, partition)
-			} else {
-				err = buf.appendBuy(symbol, restPrice, qty, prefix, id, partition)
-			}
-		case "m4":
-			if lastRestID != 0 {
-				body, mErr := benchutil.MarshalCancelEnvelope(id, symbol, lastRestID, uint32(partition), 0)
-				if mErr != nil {
-					return sent, mErr
-				}
-				err = buf.append(body)
-			}
-			if err == nil {
-				err = buf.appendBuy(symbol, restPrice, qty, prefix, id+1, partition)
-				if err == nil {
-					lastRestID = id + 1
-					seq++
-				}
-			}
-		default:
-			return sent, fmt.Errorf("unknown scenario %q (use m1|m2|m3|m4)", scenario)
-		}
+		extraSeq, err := enqueueScenarioTick(ctx, pipe, scenario, symbol, crossPrice, restPrice, qty, prefix, id, partition, seq, &lastRestID)
 		if err != nil {
 			return sent, err
 		}
+		seq += extraSeq
 		sent++
 	}
+}
+
+// enqueueScenarioTick 按场景生成一条 tick 的消息并入队（m4 可能 0～2 条 Kafka 消息）。
+func enqueueScenarioTick(
+	ctx context.Context,
+	pipe *kafkaSendPipeline,
+	scenario, symbol, crossPrice, restPrice, qty, prefix string,
+	id uint64,
+	partition int,
+	seq uint64,
+	lastRestID *uint64,
+) (extraSeq uint64, err error) {
+	switch scenario {
+	case "m1":
+		return 0, enqueueBuy(ctx, pipe, symbol, restPrice, qty, prefix, id, partition)
+	case "m2":
+		return 0, enqueueBuy(ctx, pipe, symbol, crossPrice, qty, prefix, id, partition)
+	case "m3":
+		if seq%10 < 7 {
+			return 0, enqueueBuy(ctx, pipe, symbol, crossPrice, qty, prefix, id, partition)
+		}
+		return 0, enqueueBuy(ctx, pipe, symbol, restPrice, qty, prefix, id, partition)
+	case "m4":
+		if *lastRestID != 0 {
+			body, mErr := benchutil.MarshalCancelEnvelope(id, symbol, *lastRestID, uint32(partition), 0)
+			if mErr != nil {
+				return 0, mErr
+			}
+			if err := pipe.enqueue(ctx, body); err != nil {
+				return 0, err
+			}
+		}
+		if err := enqueueBuy(ctx, pipe, symbol, restPrice, qty, prefix, id+1, partition); err != nil {
+			return 0, err
+		}
+		*lastRestID = id + 1
+		return 1, nil
+	default:
+		return 0, fmt.Errorf("unknown scenario %q (use m1|m2|m3|m4)", scenario)
+	}
+}
+
+func enqueueBuy(ctx context.Context, pipe *kafkaSendPipeline, symbol, price, qty, prefix string, id uint64, partition int) error {
+	body, err := marshalBuy(symbol, price, qty, prefix, id, partition)
+	if err != nil {
+		return err
+	}
+	return pipe.enqueue(ctx, body)
 }
 
 func marshalBuy(symbol, price, qty, prefix string, id uint64, partition int) ([]byte, error) {
 	return benchutil.MarshalNewOrderEnvelope(benchutil.NewOrderParams{
 		CommandID: id, OrderID: id,
 		ClientOrderID: benchutil.ClientOrderID(prefix, id),
-		Symbol: symbol, Side: commonv1.Side_SIDE_BUY,
+		Symbol:        symbol, Side: commonv1.Side_SIDE_BUY,
 		Price: price, Quantity: qty,
 		Partition: uint32(partition),
 	})

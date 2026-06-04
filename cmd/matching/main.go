@@ -83,6 +83,12 @@ func main() {
 		ShardID:        cfg.ShardID,
 		DataDir:        cfg.DataDir,
 		SnapshotEvery:  cfg.SnapshotEvery,
+		WALGroupCommit: recovery.WALGroupCommitConfig{
+			SyncEveryRecords:    cfg.WALGroupCommit.SyncEveryRecords,
+			SyncIntervalMs:      cfg.WALGroupCommit.SyncIntervalMs,
+			ConsumerBatchMax:    cfg.WALGroupCommit.ConsumerBatchMax,
+			ConsumerBatchWaitMs: cfg.WALGroupCommit.ConsumerBatchWaitMs,
+		},
 		SymbolRegistry: symbolRegistry,
 		Metrics:        m,
 	})
@@ -266,7 +272,11 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 		Metrics:   m,
 	}
 	go pollKafkaLag(ctx, reader, m, log)
-	return consumer.Run(ctx, reader, h)
+	batchMax, batchWait := cfg.WALGroupCommit.ConsumerRunOptions()
+	return consumer.Run(ctx, reader, h, consumer.RunOptions{
+		BatchMax:  batchMax,
+		BatchWait: batchWait,
+	})
 }
 
 func pollKafkaLag(ctx context.Context, reader *kafka.CommandReader, m *metrics.Metrics, log zerolog.Logger) {

@@ -16,6 +16,8 @@ import (
 var histogramNames = []string{
 	"matching_processing_latency_ms",
 	"matching_wal_append_latency_ms",
+	"matching_wal_sync_latency_ms",
+	"matching_wal_sync_batch_records",
 	"matching_publish_latency_ms",
 	"matching_publish_match_latency_ms",
 	"matching_publish_trade_latency_ms",
@@ -124,6 +126,9 @@ func printDeltaReport(w io.Writer, prePath, postPath, label string) error {
 			fmt.Fprintf(w, "%s P50: %.2f ms\n", name, deltaH.Quantile(0.50))
 			fmt.Fprintf(w, "%s P95: %.2f ms\n", name, deltaH.Quantile(0.95))
 			fmt.Fprintf(w, "%s P99: %.2f ms\n", name, deltaH.Quantile(0.99))
+		case "matching_wal_sync_batch_records":
+			fmt.Fprintf(w, "%s P50: %.0f records\n", name, deltaH.Quantile(0.50))
+			fmt.Fprintf(w, "%s P99: %.0f records\n", name, deltaH.Quantile(0.99))
 		default:
 			fmt.Fprintf(w, "%s P99: %.2f ms\n", name, deltaH.Quantile(0.99))
 		}
@@ -145,6 +150,11 @@ func printReport(w io.Writer, body, label string) error {
 	}
 	r3 := strings.NewReader(body)
 	wal, err := benchutil.ParseHistogram(r3, "matching_wal_append_latency_ms")
+	if err != nil {
+		return err
+	}
+	rWalSync := strings.NewReader(body)
+	walSync, err := benchutil.ParseHistogram(rWalSync, "matching_wal_sync_latency_ms")
 	if err != nil {
 		return err
 	}
@@ -178,7 +188,8 @@ func printReport(w io.Writer, body, label string) error {
 	fmt.Fprintf(w, "matching_processing_latency_ms P50: %.2f ms\n", proc.Quantile(0.50))
 	fmt.Fprintf(w, "matching_processing_latency_ms P95: %.2f ms\n", proc.Quantile(0.95))
 	fmt.Fprintf(w, "matching_processing_latency_ms P99: %.2f ms\n", proc.Quantile(0.99))
-	fmt.Fprintf(w, "matching_wal_append_latency_ms P99: %.2f ms\n", wal.Quantile(0.99))
+	fmt.Fprintf(w, "matching_wal_append_latency_ms P99: %.2f ms (per cmd; group commit=amortized)\n", wal.Quantile(0.99))
+	fmt.Fprintf(w, "matching_wal_sync_latency_ms P99: %.2f ms (per batch Sync)\n", walSync.Quantile(0.99))
 	fmt.Fprintf(w, "matching_publish_latency_ms P99: %.2f ms\n", pub.Quantile(0.99))
 	fmt.Fprintf(w, "matching_publish_match_latency_ms P99: %.2f ms\n", pubMatch.Quantile(0.99))
 	fmt.Fprintf(w, "matching_publish_trade_latency_ms P99: %.2f ms\n", pubTrade.Quantile(0.99))

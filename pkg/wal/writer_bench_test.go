@@ -22,3 +22,27 @@ func BenchmarkFileWriter_appendFsync(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkFileWriter_groupCommit32 每 32 条一次 Sync（组提交）。
+func BenchmarkFileWriter_groupCommit32(b *testing.B) {
+	dir := b.TempDir()
+	w, err := OpenFileWriter(dir, FileWriterConfig{SyncEveryRecords: 32})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer w.Close()
+
+	payload := []byte("bench-payload")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := w.AppendNext(EventTypeNewOrder, payload); err != nil {
+			b.Fatal(err)
+		}
+		if (i+1)%32 == 0 {
+			if err := w.Sync(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}

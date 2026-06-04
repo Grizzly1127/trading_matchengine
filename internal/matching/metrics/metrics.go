@@ -19,6 +19,8 @@ type Metrics struct {
 
 	processingLatency    prometheus.Histogram
 	walAppendLatency     prometheus.Histogram
+	walSyncLatency       prometheus.Histogram
+	walSyncBatchRecords  prometheus.Histogram
 	publishLatency       prometheus.Histogram
 	publishMatchLatency  prometheus.Histogram
 	publishTradeLatency  prometheus.Histogram
@@ -35,9 +37,19 @@ func New() *Metrics {
 			Buckets: []float64{0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
 		}),
 		walAppendLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "matching_wal_append_latency_ms",
-			Help:    "WAL append + fsync latency in milliseconds per command",
+			Name: "matching_wal_append_latency_ms",
+			Help: "WAL durable cost per command in ms: each append+fsync when sync_every<=1; amortized sync/batch_size when group commit",
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500},
+		}),
+		walSyncLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_wal_sync_latency_ms",
+			Help:    "WAL group commit: single fdatasync wall time per CommitBatch (not per command)",
+			Buckets: []float64{0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		}),
+		walSyncBatchRecords: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_wal_sync_batch_records",
+			Help:    "WAL group commit: number of records included in each Sync batch",
+			Buckets: []float64{1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128},
 		}),
 		publishLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "matching_publish_latency_ms",
@@ -80,6 +92,8 @@ func New() *Metrics {
 	prometheus.MustRegister(
 		m.processingLatency,
 		m.walAppendLatency,
+		m.walSyncLatency,
+		m.walSyncBatchRecords,
 		m.publishLatency,
 		m.publishMatchLatency,
 		m.publishTradeLatency,
@@ -121,12 +135,24 @@ func (m *Metrics) ObservePublish(matchDur, tradeDur time.Duration, matchEvents, 
 	}
 }
 
-// ObserveWalAppend 记录 WAL 落盘耗时。
+// ObserveWalAppend 记录单条命令 WAL 落盘耗时（每条 append+fsync 模式）。
 func (m *Metrics) ObserveWalAppend(d time.Duration) {
-	if m == nil {
+	if m == nil || d <= 0 {
 		return
 	}
 	m.walAppendLatency.Observe(float64(d.Milliseconds()))
+}
+
+// ObserveWalGroupCommit 记录组提交一次 Sync：批墙钟 + 批大小，并按条摊销写入 wal_append。
+func (m *Metrics) ObserveWalGroupCommit(syncDur time.Duration, records int) {
+	if m == nil || records <= 0 || syncDur <= 0 {
+		return
+	}
+	ms := float64(syncDur.Milliseconds())
+	m.walSyncLatency.Observe(ms)
+	m.walSyncBatchRecords.Observe(float64(records))
+	perCmd := syncDur / time.Duration(records)
+	m.walAppendLatency.Observe(float64(perCmd.Milliseconds()))
 }
 
 // ObserveCommandFailed 处理失败计数。

@@ -2,7 +2,6 @@ package publisher
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -14,6 +13,8 @@ import (
 // Publisher 将事件写入 Kafka。
 type Publisher interface {
 	Publish(ctx context.Context, out Outbound) error
+	// PublishBatch 聚合多条命令的 outbound，按 symbol 分组后各 topic 批量 WriteBatch（组提交路径）。
+	PublishBatch(ctx context.Context, outs []Outbound) error
 }
 
 // KafkaPublisher 使用 Producer 发布 protobuf 事件。
@@ -25,70 +26,72 @@ type KafkaPublisher struct {
 }
 
 // Publish 写入 match.events 与 trade.events。
-// 当 match 与 trade 均有事件时并行 WriteBatch，端到端 Publish 耗时约为 max(match, trade) 而非二者之和。
 func (p *KafkaPublisher) Publish(ctx context.Context, out Outbound) error {
-	hasMatch := len(out.MatchEvents) > 0
-	hasTrade := len(out.TradeEvents) > 0
+	return p.PublishBatch(ctx, []Outbound{out})
+}
 
-	var matchDur, tradeDur time.Duration
-	var err error
-
-	switch {
-	case hasMatch && hasTrade:
-		matchDur, tradeDur, err = p.publishMatchTradeParallel(ctx, out)
-	case hasMatch:
-		matchDur, err = p.publishMatch(ctx, out)
-	case hasTrade:
-		tradeDur, err = p.publishTrade(ctx, out)
+// PublishBatch 合并多条 outbound 后发布；单 symbol 时整批各 topic 一次 WriteBatch。
+// match 与 trade 均有数据时并行刷盘，墙钟约为 max(match, trade)。
+func (p *KafkaPublisher) PublishBatch(ctx context.Context, outs []Outbound) error {
+	merged := mergeOutbound(outs)
+	if len(merged.MatchEvents) == 0 && len(merged.TradeEvents) == 0 {
+		return nil
 	}
 
+	matchDur, tradeDur, err := p.publishMerged(ctx, merged)
 	if err != nil {
 		return err
 	}
 	if p.Metrics != nil {
-		p.Metrics.ObservePublish(matchDur, tradeDur, len(out.MatchEvents), len(out.TradeEvents))
+		p.Metrics.ObservePublish(matchDur, tradeDur, len(merged.MatchEvents), len(merged.TradeEvents))
 	}
 	return nil
 }
 
-func (p *KafkaPublisher) publishMatch(ctx context.Context, out Outbound) (time.Duration, error) {
-	key := []byte(out.MatchEvents[0].GetSymbol())
-	vals, err := marshalMatchBatch(out.MatchEvents)
-	if err != nil {
-		return 0, fmt.Errorf("publisher: marshal match events: %w", err)
+func mergeOutbound(outs []Outbound) Outbound {
+	var merged Outbound
+	for _, o := range outs {
+		merged.MatchEvents = append(merged.MatchEvents, o.MatchEvents...)
+		merged.TradeEvents = append(merged.TradeEvents, o.TradeEvents...)
 	}
+	return merged
+}
+
+func (p *KafkaPublisher) publishMerged(ctx context.Context, merged Outbound) (matchDur, tradeDur time.Duration, err error) {
+	hasMatch := len(merged.MatchEvents) > 0
+	hasTrade := len(merged.TradeEvents) > 0
+
+	switch {
+	case hasMatch && hasTrade:
+		return p.publishMatchTradeParallel(ctx, merged)
+	case hasMatch:
+		matchDur, err = p.publishMatchAll(ctx, merged.MatchEvents)
+		return matchDur, 0, err
+	case hasTrade:
+		tradeDur, err = p.publishTradeAll(ctx, merged.TradeEvents)
+		return 0, tradeDur, err
+	default:
+		return 0, 0, nil
+	}
+}
+
+func (p *KafkaPublisher) publishMatchAll(ctx context.Context, events []*matchingv1.MatchEvent) (time.Duration, error) {
 	start := time.Now()
-	if err := p.Producer.WriteBatch(ctx, p.MatchTopic, key, vals); err != nil {
+	if err := p.writeMatchBySymbol(ctx, events); err != nil {
 		return 0, err
 	}
 	return time.Since(start), nil
 }
 
-func (p *KafkaPublisher) publishTrade(ctx context.Context, out Outbound) (time.Duration, error) {
-	key := []byte(out.TradeEvents[0].GetTrade().GetSymbol())
-	vals, err := marshalTradeBatch(out.TradeEvents)
-	if err != nil {
-		return 0, fmt.Errorf("publisher: marshal trade events: %w", err)
-	}
+func (p *KafkaPublisher) publishTradeAll(ctx context.Context, events []*matchingv1.TradeEvent) (time.Duration, error) {
 	start := time.Now()
-	if err := p.Producer.WriteBatch(ctx, p.TradeTopic, key, vals); err != nil {
+	if err := p.writeTradeBySymbol(ctx, events); err != nil {
 		return 0, err
 	}
 	return time.Since(start), nil
 }
 
-func (p *KafkaPublisher) publishMatchTradeParallel(ctx context.Context, out Outbound) (matchDur, tradeDur time.Duration, err error) {
-	matchKey := []byte(out.MatchEvents[0].GetSymbol())
-	matchVals, err := marshalMatchBatch(out.MatchEvents)
-	if err != nil {
-		return 0, 0, fmt.Errorf("publisher: marshal match events: %w", err)
-	}
-	tradeKey := []byte(out.TradeEvents[0].GetTrade().GetSymbol())
-	tradeVals, err := marshalTradeBatch(out.TradeEvents)
-	if err != nil {
-		return 0, 0, fmt.Errorf("publisher: marshal trade events: %w", err)
-	}
-
+func (p *KafkaPublisher) publishMatchTradeParallel(ctx context.Context, merged Outbound) (matchDur, tradeDur time.Duration, err error) {
 	var wg sync.WaitGroup
 	var matchErr, tradeErr error
 
@@ -96,13 +99,13 @@ func (p *KafkaPublisher) publishMatchTradeParallel(ctx context.Context, out Outb
 	go func() {
 		defer wg.Done()
 		start := time.Now()
-		matchErr = p.Producer.WriteBatch(ctx, p.MatchTopic, matchKey, matchVals)
+		matchErr = p.writeMatchBySymbol(ctx, merged.MatchEvents)
 		matchDur = time.Since(start)
 	}()
 	go func() {
 		defer wg.Done()
 		start := time.Now()
-		tradeErr = p.Producer.WriteBatch(ctx, p.TradeTopic, tradeKey, tradeVals)
+		tradeErr = p.writeTradeBySymbol(ctx, merged.TradeEvents)
 		tradeDur = time.Since(start)
 	}()
 	wg.Wait()
@@ -114,6 +117,14 @@ func (p *KafkaPublisher) publishMatchTradeParallel(ctx context.Context, out Outb
 		return matchDur, tradeDur, tradeErr
 	}
 	return matchDur, tradeDur, nil
+}
+
+func (p *KafkaPublisher) writeMatchBySymbol(ctx context.Context, events []*matchingv1.MatchEvent) error {
+	return writeEventsBySymbol(ctx, p.Producer, p.MatchTopic, events, matchSymbol, marshalMatchBatch)
+}
+
+func (p *KafkaPublisher) writeTradeBySymbol(ctx context.Context, events []*matchingv1.TradeEvent) error {
+	return writeEventsBySymbol(ctx, p.Producer, p.TradeTopic, events, tradeSymbol, marshalTradeBatch)
 }
 
 // MemoryPublisher 测试用内存发布器。
@@ -128,11 +139,17 @@ func NewMemory() *MemoryPublisher {
 	return &MemoryPublisher{}
 }
 
-func (m *MemoryPublisher) Publish(_ context.Context, out Outbound) error {
+func (m *MemoryPublisher) Publish(ctx context.Context, out Outbound) error {
+	return m.PublishBatch(ctx, []Outbound{out})
+}
+
+func (m *MemoryPublisher) PublishBatch(_ context.Context, outs []Outbound) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.match = append(m.match, out.MatchEvents...)
-	m.trade = append(m.trade, out.TradeEvents...)
+	for _, out := range outs {
+		m.match = append(m.match, out.MatchEvents...)
+		m.trade = append(m.trade, out.TradeEvents...)
+	}
 	return nil
 }
 

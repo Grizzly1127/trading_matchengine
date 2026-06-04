@@ -1,7 +1,7 @@
 # Benchmark 与压测方案
 
 **版本**: 1.0  
-**关联**: [architecture-spec.md](./develop_docs/architecture-spec.md) Phase 4 · [development-checklist.md](./develop_docs/development-checklist.md) §4.3
+**关联**: [architecture-spec.md](./develop_docs/architecture-spec.md) Phase 4 · [development-checklist.md](./develop_docs/development-checklist.md) §4.3 · [l2-optimization-roadmap.md](./develop_docs/l2-optimization-roadmap.md)（L2 未达标时的优化路线图）· [l2-optimization-journey.md](./develop_docs/l2-optimization-journey.md)（**已做优化逐步复盘**）
 
 本文描述本仓库 **L0～L3** 性能测试分层、验收指标与可执行命令。开发环境使用本地 Docker Compose，无需云托管。
 
@@ -296,12 +296,16 @@ go tool pprof -http=:0 /tmp/cpu.prof
 
 只覆盖**纯撮合内存路径**，不含 WAL/Kafka。
 
-### 9.6 建议优化顺序（P99≈25ms、目标 10ms）
+### 9.6 L2 未达标时的优化路线图
 
-1. 对比 `wal_append` 与 `processing` P99 — WAL 若占大半 → 磁盘 / 批量 fsync 策略  
-2. CPU profile 看 `Publish` / `proto` — 事件条数、批量是否生效  
-3. 吃单场景看 `makerFillEvent` / 事件条数 — 已用 `FindOrder` O(1) 查单  
-4. L0 `benchstat` 对比 matcher 改动前后
+完整方案（瓶颈分解、P0/P1/P2、架构评审项、已完成项）：**[l2-optimization-roadmap.md](./develop_docs/l2-optimization-roadmap.md)**。
+
+摘要：
+
+1. **吞吐**：单 symbol 串行要 5000/s ⇒ 平均 **≤0.2ms/条**；P99≤10ms **不推出** 5000/s（当前 P50≈7.5ms ⇒ ~130/s）。
+2. **P0**：WAL **group commit**（摊销 fsync）；Kafka **墙钟**（batch/事件条数/协议，禁止违规先 commit）。
+3. **P1**：磁盘/tmpfs、L1 fsync bench、`metrics-load-window` + block/trace。
+4. **验收**：`run-l2.sh --scenario m3 --rate 5000 --duration 5m`，同时 TPS≥5000、lag≤50、P99≤10ms。
 
 ---
 
@@ -320,10 +324,11 @@ go tool pprof -http=:0 /tmp/cpu.prof
 ## 11. 目录索引
 
 ```text
+docs/develop_docs/l2-optimization-roadmap.md  # L2 优化路线图（Phase 4 吞吐/延迟）
 cmd/bench-producer/     # Kafka 命令生产者
 cmd/bench-report/       # Prometheus 指标摘要
 pkg/benchutil/          # 命令构造 + 直方图解析
-scripts/bench/          # run-l0.sh, run-l2.sh, e1-orders.sh, collect-metrics.sh
+scripts/bench/          # run-l0.sh, run-l2.sh, reset-l2-env.sh, collect-pprof.sh
 reports/                # 压测输出（git 忽略 *.txt/*.bin，保留 .gitkeep）
 internal/matching/engine/matcher_bench_test.go
 pkg/wal/writer_bench_test.go

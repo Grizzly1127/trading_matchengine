@@ -122,13 +122,21 @@ metric_kafka_lag() {
   awk '/matching_kafka_lag:/{print $2}' "$1" | tail -1
 }
 
+# 从 Prometheus 文本拉取单指标；勿用 curl|awk exit，pipefail 下 curl 可能以 23 退出导致脚本静默中断。
+fetch_prom_gauge() {
+  local pattern="$1"
+  local raw
+  raw="$(curl -sf "$METRICS_URL")" || return 1
+  echo "$raw" | awk -v re="$pattern" '$0 ~ re { print $2; exit }'
+}
+
 wait_matching_lag() {
   local max_wait="$1"
   [[ "$max_wait" -le 0 ]] && return 0
   local elapsed=0
   while [[ "$elapsed" -lt "$max_wait" ]]; do
     local lag
-    lag="$(curl -sf "$METRICS_URL" | awk '/^matching_kafka_lag /{print $2; exit}')"
+    lag="$(fetch_prom_gauge '^matching_kafka_lag ')" || die "无法拉取 metrics ($METRICS_URL)，请确认 matching 已启动"
     lag="${lag%%.*}"
     if [[ -z "$lag" || "$lag" -le 50 ]]; then
       log "matching_kafka_lag=${lag:-0}（可开始正式压测）"

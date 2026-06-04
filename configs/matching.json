@@ -4,6 +4,12 @@
   "shards_file": "configs/shards.json",
   "snapshot_every": 100000,
   "snapshot_on_exit": true,
+  "wal_group_commit": {
+    "sync_every_records": 32,
+    "sync_interval_ms": 2,
+    "consumer_batch_max": 32,
+    "consumer_batch_wait_ms": 2
+  },
   "default_symbol": "BTC-USDT",
   "symbols_file": "configs/symbols.json",
   "metrics_listen": ":9101",
@@ -24,7 +30,8 @@
     "partition": 0,
     "required_acks": "one",
     "batch_size": 256,
-    "batch_timeout_ms": 5
+    "batch_timeout_ms": 5,
+    "compression": "lz4"
   },
   "log": {
     "level": "info",

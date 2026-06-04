@@ -17,8 +17,8 @@ import (
 const (
 	defaultMaxSegmentBytes = 100 * 1024 * 1024
 	defaultWriteBufferSize = 64 * 1024
-	segmentFilePrefix        = "wal_"
-	segmentFileSuffix        = ".log"
+	segmentFilePrefix      = "wal_"
+	segmentFileSuffix      = ".log"
 )
 
 var (
@@ -27,7 +27,7 @@ var (
 	ErrEmptyShardDir = errors.New("wal: shard directory is required")
 )
 
-// Writer 将 WAL 记录顺序追加到本地磁盘；每次 Append 后 durable sync。
+// Writer 将 WAL 记录顺序追加到本地磁盘。
 type Writer interface {
 	// Append 追加一条 WAL 记录；seq 必须严格递增。
 	Append(seq uint64, eventType byte, payload []byte) error
@@ -41,21 +41,33 @@ type FileWriterConfig struct {
 	MaxSegmentBytes int64
 	// WriteBufferSize 用户态写缓冲；0 表示默认 64KB。
 	WriteBufferSize int
+	// SyncEveryRecords 每追加 N 条后自动 fdatasync；<=1 表示每条都 sync（默认行为）。
+	SyncEveryRecords int
+	// SyncIntervalMs 距上次 sync 超过该毫秒也触发 sync（仅当 SyncEveryRecords>1 时在 Sync() 外生效）；0 禁用。
+	SyncIntervalMs int
+}
+
+// GroupCommitEnabled 是否启用组提交（多条 append 后才 fsync）。
+func (c FileWriterConfig) GroupCommitEnabled() bool {
+	return c.SyncEveryRecords > 1 || c.SyncIntervalMs > 0
 }
 
 // FileWriter 将 WAL 写入 data/wal/{shard_id}/wal_NNNNNN.log。
 type FileWriter struct {
-	dir             string
-	cfg             FileWriterConfig
-	mu              sync.Mutex
-	file            *os.File
-	buf             *bufio.Writer
-	path            string
-	segment         int
-	lastSeq         uint64
-	written         int64
-	closed          bool
-	writeBufferSize int
+	dir              string
+	cfg              FileWriterConfig
+	mu               sync.Mutex
+	file             *os.File
+	buf              *bufio.Writer
+	path             string
+	segment          int
+	lastSeq          uint64
+	lastDurableSeq   uint64
+	written          int64
+	closed           bool
+	writeBufferSize  int
+	recordsSinceSync int
+	lastSyncAt       time.Time
 }
 
 // OpenFileWriter 打开或创建 shard WAL 目录，并追加写入最新 segment。
@@ -70,11 +82,19 @@ func OpenFileWriter(dir string, cfg FileWriterConfig) (*FileWriter, error) {
 	if bufSize <= 0 {
 		bufSize = defaultWriteBufferSize
 	}
+	if cfg.SyncEveryRecords <= 0 {
+		cfg.SyncEveryRecords = 1
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("wal: mkdir %q: %w", dir, err)
 	}
 
-	w := &FileWriter{dir: dir, cfg: cfg, writeBufferSize: bufSize}
+	w := &FileWriter{
+		dir:             dir,
+		cfg:             cfg,
+		writeBufferSize: bufSize,
+		lastSyncAt:      time.Now(),
+	}
 	segment, err := w.latestSegment()
 	if err != nil {
 		return nil, err
@@ -88,6 +108,7 @@ func OpenFileWriter(dir string, cfg FileWriterConfig) (*FileWriter, error) {
 		return nil, err
 	}
 	w.lastSeq = lastSeq
+	w.lastDurableSeq = lastSeq
 	if _, err := w.file.Seek(0, io.SeekEnd); err != nil {
 		_ = w.closeFileLocked()
 		return nil, fmt.Errorf("wal: seek end: %w", err)
@@ -98,14 +119,19 @@ func OpenFileWriter(dir string, cfg FileWriterConfig) (*FileWriter, error) {
 	return w, nil
 }
 
-// Append 编码并写入一条记录，刷缓冲并 durable sync。
+// GroupCommitEnabled 同 FileWriterConfig.GroupCommitEnabled。
+func (w *FileWriter) GroupCommitEnabled() bool {
+	return w.cfg.GroupCommitEnabled()
+}
+
+// Append 编码并写入一条记录；SyncEveryRecords<=1 时立即 durable sync。
 func (w *FileWriter) Append(seq uint64, eventType byte, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.appendLocked(seq, eventType, payload)
 }
 
-// AppendNext 分配递增 seq 并追加（seq = lastSeq+1），减少上层 LastSeq 再 Append 的重复逻辑。
+// AppendNext 分配递增 seq 并追加。
 func (w *FileWriter) AppendNext(eventType byte, payload []byte) (uint64, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -141,18 +167,50 @@ func (w *FileWriter) appendLocked(seq uint64, eventType byte, payload []byte) er
 	}
 	releaseFrame(frame)
 
-	if err := w.flushAndSyncLocked(); err != nil {
-		return err
-	}
-
 	w.lastSeq = seq
 	w.written += int64(frameLen)
+	w.recordsSinceSync++
+
+	if err := w.maybeSyncLocked(false); err != nil {
+		return err
+	}
 
 	if w.written >= w.cfg.MaxSegmentBytes {
 		if err := w.rotateLocked(); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// Sync 强制刷缓冲并 fdatasync，使 lastSeq 成为 durable。
+func (w *FileWriter) Sync() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.maybeSyncLocked(true)
+}
+
+func (w *FileWriter) maybeSyncLocked(force bool) error {
+	if w.recordsSinceSync == 0 && !force {
+		return nil
+	}
+	if !force && w.cfg.GroupCommitEnabled() {
+		// 组提交：仅由显式 Sync() 落盘，不在 append 时自动 sync。
+		return nil
+	}
+	if !force && w.cfg.SyncEveryRecords > 1 {
+		if w.recordsSinceSync < w.cfg.SyncEveryRecords {
+			if w.cfg.SyncIntervalMs <= 0 || time.Since(w.lastSyncAt) < time.Duration(w.cfg.SyncIntervalMs)*time.Millisecond {
+				return nil
+			}
+		}
+	}
+	if err := w.flushAndSyncLocked(); err != nil {
+		return err
+	}
+	w.lastDurableSeq = w.lastSeq
+	w.recordsSinceSync = 0
+	w.lastSyncAt = time.Now()
 	return nil
 }
 
@@ -184,7 +242,7 @@ func (w *FileWriter) closeFileLocked() error {
 	if w.file == nil {
 		return nil
 	}
-	if err := w.flushAndSyncLocked(); err != nil {
+	if err := w.maybeSyncLocked(true); err != nil {
 		_ = w.file.Close()
 		w.file = nil
 		w.buf = nil
@@ -196,11 +254,18 @@ func (w *FileWriter) closeFileLocked() error {
 	return err
 }
 
-// LastSeq 返回已持久化的最大 seq（供上层恢复位点）。
+// LastSeq 返回已分配的最大 seq（含尚未 sync 的缓冲记录）。
 func (w *FileWriter) LastSeq() uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.lastSeq
+}
+
+// LastDurableSeq 返回已 fdatasync 的最大 seq。
+func (w *FileWriter) LastDurableSeq() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastDurableSeq
 }
 
 // latestSegment 返回 shard 目录中编号最大的 segment；无文件时返回 1。
@@ -245,7 +310,7 @@ func parseSegmentName(name string) (int, bool) {
 // openSegment 打开或创建指定编号的 segment 文件并切换写入目标。
 func (w *FileWriter) openSegment(segment int) error {
 	if w.file != nil {
-		if err := w.flushAndSyncLocked(); err != nil {
+		if err := w.maybeSyncLocked(true); err != nil {
 			return err
 		}
 		if err := w.file.Close(); err != nil {

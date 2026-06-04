@@ -39,11 +39,18 @@ if [[ "$DELTA_SEC" -le 0 ]]; then
   exit 0
 fi
 
+prom_gauge() {
+  local pattern="$1"
+  local raw
+  raw="$(curl -sf "$METRICS_URL")" || return 1
+  echo "$raw" | awk -v re="$pattern" '$0 ~ re { print $2; exit }'
+}
+
 report "before"
-before="$(curl -sf "$METRICS_URL" | awk '/^matching_commands_processed_total /{print $2; exit}')"
+before="$(prom_gauge '^matching_commands_processed_total ')"
 sleep "$DELTA_SEC"
 report "after"
-after="$(curl -sf "$METRICS_URL" | awk '/^matching_commands_processed_total /{print $2; exit}')"
+after="$(prom_gauge '^matching_commands_processed_total ')"
 if [[ -n "$before" && -n "$after" ]]; then
   awk -v b="$before" -v a="$after" -v s="$DELTA_SEC" 'BEGIN {
     printf "drain_tps_after_load: %.0f (/s over %ds, tail backlog only)\n", (a-b)/s, s
