@@ -2,7 +2,7 @@
   "data_dir": "data",
   "shard_id": "shard-0",
   "shards_file": "configs/shards.json",
-  "snapshot_every": 10000,
+  "snapshot_every": 100000,
   "snapshot_on_exit": true,
   "default_symbol": "BTC-USDT",
   "symbols_file": "configs/symbols.json",
@@ -21,7 +21,10 @@
     "command_topic": "order.commands",
     "match_topic": "match.events",
     "trade_topic": "trade.events",
-    "partition": 0
+    "partition": 0,
+    "required_acks": "one",
+    "batch_size": 256,
+    "batch_timeout_ms": 5
   },
   "log": {
     "level": "info",

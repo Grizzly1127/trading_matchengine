@@ -10,8 +10,8 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
-	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
+	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"google.golang.org/protobuf/proto"
 )
 

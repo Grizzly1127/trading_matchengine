@@ -108,6 +108,14 @@ func (b *OrderBook) findInBook(orderID uint64) bool {
 	return b.getSiteBook(o.Side).Contains(o)
 }
 
+func (b *OrderBook) FindOrder(orderID uint64) (Order, bool) {
+	o, ok := b.orderMap[orderID]
+	if !ok {
+		return Order{}, false
+	}
+	return o, true
+}
+
 // HasActiveOrder 订单是否仍在盘口（对账用）。
 func (b *OrderBook) HasActiveOrder(orderID uint64) bool {
 	return b.findInBook(orderID)

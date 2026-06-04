@@ -9,6 +9,23 @@ import (
 	"time"
 )
 
+func TestFileWriter_appendNext(t *testing.T) {
+	w, err := OpenFileWriter(t.TempDir(), FileWriterConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	seq, err := w.AppendNext(EventTypeNewOrder, []byte("a"))
+	if err != nil || seq != 1 {
+		t.Fatalf("seq=%d err=%v want 1", seq, err)
+	}
+	seq, err = w.AppendNext(EventTypeCancelOrder, []byte("b"))
+	if err != nil || seq != 2 {
+		t.Fatalf("seq=%d err=%v want 2", seq, err)
+	}
+}
+
 func TestFileWriter_appendAndReopen(t *testing.T) {
 	dir := t.TempDir()
 

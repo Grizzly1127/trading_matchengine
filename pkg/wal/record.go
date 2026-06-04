@@ -65,8 +65,24 @@ func (r Record) Encode() ([]byte, error) {
 	if bodyLen > recordMaxBodyLen {
 		return nil, fmt.Errorf("wal: record body too large: %d", bodyLen)
 	}
-
 	frame := make([]byte, recordLenSize+bodyLen)
+	if err := r.encodeInto(frame); err != nil {
+		return nil, err
+	}
+	return frame, nil
+}
+
+// encodeInto 将记录写入已分配好的 frame（len 须为 recordLenSize+BodyLen()）。
+func (r Record) encodeInto(frame []byte) error {
+	bodyLen := r.BodyLen()
+	if bodyLen > recordMaxBodyLen {
+		return fmt.Errorf("wal: record body too large: %d", bodyLen)
+	}
+	want := recordLenSize + bodyLen
+	if len(frame) < want {
+		return fmt.Errorf("wal: frame buffer too short: %d < %d", len(frame), want)
+	}
+
 	binary.LittleEndian.PutUint32(frame[0:recordLenSize], uint32(bodyLen))
 
 	off := recordLenSize
@@ -81,8 +97,7 @@ func (r Record) Encode() ([]byte, error) {
 
 	crc := crc32.ChecksumIEEE(frame[recordLenSize:off])
 	binary.LittleEndian.PutUint32(frame[off:off+recordCRCSize], crc)
-
-	return frame, nil
+	return nil
 }
 
 // DecodeRecord 从完整帧（含长度前缀）解析一条记录。

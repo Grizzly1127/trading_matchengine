@@ -49,6 +49,7 @@ Client ──HTTPS/WS─────────────────┘     
 | [deploy/docker/README.md](deploy/docker/README.md) | 镜像构建 |
 | [deploy/nginx/README.md](deploy/nginx/README.md) | Nginx 配置说明 |
 | [docs/develop_docs/architecture-spec.md](docs/develop_docs/architecture-spec.md) | 架构与 Phase 验收 |
+| [docs/benchmark.md](docs/benchmark.md) | 性能基准与压测（L0～L3） |
 
 ---
 
@@ -70,6 +71,8 @@ go version
 cd trading_matchengine
 go mod tidy
 make test
+make bench-l0          # 微基准（matcher / WAL / skiplist）
+# make bench-l2        # 需先 dev.sh start；见 docs/benchmark.md
 ```
 
 ### 3. 基础设施

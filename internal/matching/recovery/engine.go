@@ -24,11 +24,11 @@ const defaultSnapshotEvery = 10000
 
 // Config 持久化撮合引擎配置。
 type Config struct {
-	ShardID          string
-	DataDir          string
-	SnapshotEvery    uint64 // 每 N 条命令触发快照；0 表示默认 10000
-	SymbolRegistry   *symbolrules.Registry
-	Metrics          *metrics.Metrics
+	ShardID        string
+	DataDir        string
+	SnapshotEvery  uint64 // 每 N 条命令触发快照；0 表示默认 10000
+	SymbolRegistry *symbolrules.Registry
+	Metrics        *metrics.Metrics
 }
 
 // Engine 持久化分片：先写 WAL 再改内存，支持快照与重启恢复。
@@ -244,9 +244,9 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 		return nil, fmt.Errorf("recovery: marshal new order: %w", err)
 	}
 
-	seq := e.wal.LastSeq() + 1
 	walStart := time.Now()
-	if err := e.wal.Append(seq, wal.EventTypeNewOrder, payload); err != nil {
+	seq, err := e.wal.AppendNext(wal.EventTypeNewOrder, payload)
+	if err != nil {
 		return nil, err
 	}
 	if e.cfg.Metrics != nil {
@@ -284,9 +284,9 @@ func (e *Engine) ApplyCancel(cmd *matchingv1.CancelOrderCommand) error {
 		return fmt.Errorf("recovery: marshal cancel: %w", err)
 	}
 
-	seq := e.wal.LastSeq() + 1
 	walStart := time.Now()
-	if err := e.wal.Append(seq, wal.EventTypeCancelOrder, payload); err != nil {
+	seq, err := e.wal.AppendNext(wal.EventTypeCancelOrder, payload)
+	if err != nil {
 		return err
 	}
 	if e.cfg.Metrics != nil {

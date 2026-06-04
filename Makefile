@@ -3,7 +3,8 @@ BIN_DIR := bin
 
 .PHONY: help test test-race cover lint tidy build clean migrate-up gen-proto \
 	docker-build docker-build-matching docker-build-order docker-build-gateway \
-	helm-template kustomize-build
+	helm-template kustomize-build \
+	bench bench-l0 bench-l0-smoke build-bench bench-l2
 
 gen-proto:
 	@bash scripts/gen-proto.sh
@@ -18,6 +19,10 @@ help:
 	@echo "  make build       - build cmd binaries (when added)"
 	@echo "  make migrate-up  - apply SQL migrations (requires psql)"
 	@echo "  make clean       - remove bin/"
+	@echo "  make bench-l0    - L0 micro benchmarks (engine, skiplist, wal)"
+	@echo "  make bench-l0-smoke - short bench for CI"
+	@echo "  make build-bench - build bench-producer, bench-report"
+	@echo "  make bench-l2    - L2 matching load (requires dev.sh matching)"
 
 test:
 	go test ./...
@@ -112,3 +117,22 @@ migrate-up:
 lint:
 	@which golangci-lint >/dev/null || (echo "install: https://golangci-lint.run/welcome/install/" && exit 1)
 	golangci-lint run ./...
+
+bench-l0:
+	@chmod +x scripts/bench/run-l0.sh 2>/dev/null || true
+	./scripts/bench/run-l0.sh
+
+bench-l0-smoke:
+	@chmod +x scripts/bench/run-l0.sh 2>/dev/null || true
+	./scripts/bench/run-l0.sh --smoke
+
+build-bench:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/bench-producer ./cmd/bench-producer
+	go build -o $(BIN_DIR)/bench-report ./cmd/bench-report
+
+bench: build-bench bench-l0
+
+bench-l2: build-bench
+	@chmod +x scripts/bench/*.sh 2>/dev/null || true
+	./scripts/bench/run-l2.sh

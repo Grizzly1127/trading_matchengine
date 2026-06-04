@@ -42,6 +42,11 @@ type KafkaConfig struct {
 	MatchTopic   string   `json:"match_topic"`
 	TradeTopic   string   `json:"trade_topic"`
 	Partition    int      `json:"partition"`
+	// 发布 match/trade 事件（见 EventWriterConfig）；未配置时 acks=all、batch 见 pkg/kafka 默认。
+	RequiredAcks   string `json:"required_acks"`    // all | one | none
+	BatchSize      int    `json:"batch_size"`       // 0 = 默认 100
+	BatchTimeoutMs int    `json:"batch_timeout_ms"` // 0 = 默认 10ms
+	Compression    string `json:"compression"`      // 空 | gzip | lz4 | snappy | zstd
 }
 
 // LogConfig 控制结构化日志。
@@ -218,5 +223,11 @@ func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
 	}
 	if c.Kafka.TradeTopic == "" {
 		c.Kafka.TradeTopic = "trade.events"
+	}
+	if c.Kafka.BatchSize <= 0 {
+		c.Kafka.BatchSize = 100
+	}
+	if c.Kafka.BatchTimeoutMs <= 0 {
+		c.Kafka.BatchTimeoutMs = 10
 	}
 }

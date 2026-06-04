@@ -8,7 +8,8 @@
 #   ./scripts/dev.sh status
 #
 # 启动顺序（依赖由先到后）:
-#   matching → order → marketdata → kline → indexprice → push → [auth] → gateway
+#   order → matching → marketdata → kline → indexprice → push → [auth] → gateway
+#   （matching 启动时会 gRPC 对账 Order，必须先起 order）
 #
 # 选项:
 #   --auth   额外启动 cmd/auth（:8090，签发服务 JWT）
@@ -105,7 +106,7 @@ run_service() {
 
 # 启动列表（auth 在 gateway 之前）
 services_start_list() {
-  local names=(matching order marketdata kline indexprice push)
+  local names=(order marketdata kline indexprice push matching)
   if $DO_AUTH; then
     names+=(auth)
   fi

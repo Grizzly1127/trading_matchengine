@@ -17,8 +17,13 @@ type Metrics struct {
 	KafkaLag            atomic.Int64
 	WalLastSeq          atomic.Uint64
 
-	processingLatency prometheus.Histogram
-	walAppendLatency  prometheus.Histogram
+	processingLatency    prometheus.Histogram
+	walAppendLatency     prometheus.Histogram
+	publishLatency       prometheus.Histogram
+	publishMatchLatency  prometheus.Histogram
+	publishTradeLatency  prometheus.Histogram
+	publishMatchEvents   prometheus.Histogram
+	publishTradeEvents   prometheus.Histogram
 }
 
 // New 创建指标并在默认 Registerer 上注册。
@@ -34,6 +39,31 @@ func New() *Metrics {
 			Help:    "WAL append + fsync latency in milliseconds per command",
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500},
 		}),
+		publishLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_publish_latency_ms",
+			Help:    "Kafka publish wall time per command: max(match,trade) when both topics published in parallel, else single batch",
+			Buckets: []float64{0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
+		}),
+		publishMatchLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_publish_match_latency_ms",
+			Help:    "Kafka publish latency for match.events batch per command",
+			Buckets: []float64{0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		}),
+		publishTradeLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_publish_trade_latency_ms",
+			Help:    "Kafka publish latency for trade.events batch per command",
+			Buckets: []float64{0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		}),
+		publishMatchEvents: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_publish_match_events",
+			Help:    "Number of match events published per command",
+			Buckets: []float64{1, 2, 3, 5, 8, 13, 21, 34},
+		}),
+		publishTradeEvents: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_publish_trade_events",
+			Help:    "Number of trade events published per command",
+			Buckets: []float64{0, 1, 2, 3, 5, 8, 13, 21, 34},
+		}),
 	}
 	registerCounter("matching_commands_processed_total", "Successfully processed order.commands messages", &m.CommandsProcessed)
 	registerCounter("matching_commands_failed_total", "Failed order.commands processing attempts", &m.CommandsFailed)
@@ -47,7 +77,15 @@ func New() *Metrics {
 		return float64(m.KafkaLag.Load())
 	}))
 	registerGaugeUint64("matching_wal_last_seq", "Last WAL sequence number applied", &m.WalLastSeq)
-	prometheus.MustRegister(m.processingLatency, m.walAppendLatency)
+	prometheus.MustRegister(
+		m.processingLatency,
+		m.walAppendLatency,
+		m.publishLatency,
+		m.publishMatchLatency,
+		m.publishTradeLatency,
+		m.publishMatchEvents,
+		m.publishTradeEvents,
+	)
 	return m
 }
 
@@ -58,6 +96,29 @@ func (m *Metrics) ObserveProcessing(d time.Duration) {
 	}
 	m.CommandsProcessed.Add(1)
 	m.processingLatency.Observe(float64(d.Milliseconds()))
+}
+
+// ObservePublish 记录 Kafka 发布耗时与事件条数（match/trade 分 topic）。
+// publish_latency 取 max(matchDur, tradeDur)，与并行 WriteBatch 的墙钟一致。
+func (m *Metrics) ObservePublish(matchDur, tradeDur time.Duration, matchEvents, tradeEvents int) {
+	if m == nil {
+		return
+	}
+	wall := matchDur
+	if tradeDur > wall {
+		wall = tradeDur
+	}
+	if wall > 0 {
+		m.publishLatency.Observe(float64(wall.Milliseconds()))
+	}
+	if matchEvents > 0 && matchDur > 0 {
+		m.publishMatchLatency.Observe(float64(matchDur.Milliseconds()))
+		m.publishMatchEvents.Observe(float64(matchEvents))
+	}
+	if tradeEvents > 0 && tradeDur > 0 {
+		m.publishTradeLatency.Observe(float64(tradeDur.Milliseconds()))
+		m.publishTradeEvents.Observe(float64(tradeEvents))
+	}
 }
 
 // ObserveWalAppend 记录 WAL 落盘耗时。

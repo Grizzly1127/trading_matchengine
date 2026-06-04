@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"runtime"
 	"os/signal"
 	"syscall"
 	"time"
@@ -248,13 +250,14 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 	}
 	defer reader.Close()
 
-	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
+	writer := kafka.NewEventWriter(cfg.Kafka.EventWriterConfig())
 	defer writer.Close()
 
 	pub := &publisher.KafkaPublisher{
 		Producer:   writer,
 		MatchTopic: cfg.Kafka.MatchTopic,
 		TradeTopic: cfg.Kafka.TradeTopic,
+		Metrics:    m,
 	}
 	h := &consumer.Handler{
 		Engine:    eng,
@@ -305,9 +308,21 @@ func startAdminGRPC(ctx context.Context, log zerolog.Logger, addr string, eng *r
 	}
 }
 
+func registerPprof(mux *http.ServeMux) {
+	// 约每 1ms 阻塞采样一次，供 L2 block profile 定位 WAL/fsync 等等待。
+	runtime.SetBlockProfileRate(1_000_000)
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	mux.HandleFunc("/debug/pprof/block", pprof.Handler("block").ServeHTTP)
+}
+
 func startMetricsHTTP(ctx context.Context, log zerolog.Logger, addr string) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	registerPprof(mux)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
