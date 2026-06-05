@@ -9,6 +9,7 @@ func TestMetricsObserve(t *testing.T) {
 	m := New()
 	m.ObserveProcessing(2 * time.Millisecond)
 	m.ObserveWalAppend(time.Millisecond)
+	m.ObserveWalGroupCommit(32*time.Millisecond, 32)
 	m.SetLastProcessedOffset(42)
 	m.SetKafkaLag(3)
 	m.SetWalLastSeq(7)

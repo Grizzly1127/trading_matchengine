@@ -27,11 +27,19 @@ func BuildNewOrderEvents(shard *symbol.Shard, cmd *matchingv1.NewOrderCommand, t
 		commandID = orderID
 	}
 
-	out := Outbound{
-		MatchEvents: []*matchingv1.MatchEvent{
-			newMatchEvent(commandID, symbolName, orderID, matchingv1.MatchEventType_ORDER_ACCEPTED, cmd.GetOrder(), walSeq),
-		},
+	// 上界：accepted + 每笔 trade 的 maker + 可选 taker
+	nMatch := 1 + len(trades)
+	if len(trades) > 0 {
+		nMatch++
 	}
+
+	out := Outbound{
+		MatchEvents: make([]*matchingv1.MatchEvent, 0, nMatch),
+		TradeEvents: make([]*matchingv1.TradeEvent, 0, len(trades)),
+	}
+	out.MatchEvents = append(out.MatchEvents,
+		newMatchEvent(commandID, symbolName, orderID, matchingv1.MatchEventType_ORDER_ACCEPTED, cmd.GetOrder(), walSeq),
+	)
 
 	for _, tr := range trades {
 		out.TradeEvents = append(out.TradeEvents, &matchingv1.TradeEvent{
@@ -40,7 +48,7 @@ func BuildNewOrderEvents(shard *symbol.Shard, cmd *matchingv1.NewOrderCommand, t
 		})
 	}
 
-	seenMaker := make(map[uint64]struct{})
+	seenMaker := make(map[uint64]struct{}, len(trades))
 	for _, tr := range trades {
 		if _, ok := seenMaker[tr.MakerOrderID]; ok {
 			continue
@@ -90,11 +98,9 @@ func makerFillEvent(shard *symbol.Shard, symbolName string, tr engine.Trade, com
 	}
 	var order *commonv1.Order
 	if se, ok := shard.Get(symbolName); ok {
-		for _, o := range se.OrderBook.ActiveOrders() {
-			if o.OrderID == orderID {
-				order = engine.OrderToProto(o)
-				break
-			}
+		o, ok := se.OrderBook.FindOrder(orderID)
+		if ok {
+			order = engine.OrderToProto(o)
 		}
 	}
 	// Maker 已全成并从盘口移除时，用本笔成交量构造 remaining=0，供 Order Service 回写 filled_quantity。
@@ -125,10 +131,8 @@ func orderActive(shard *symbol.Shard, symbolName string, orderID uint64) bool {
 	if !ok {
 		return false
 	}
-	for _, o := range se.OrderBook.ActiveOrders() {
-		if o.OrderID == orderID {
-			return true
-		}
+	if _, ok := se.OrderBook.FindOrder(orderID); ok {
+		return true
 	}
 	return false
 }

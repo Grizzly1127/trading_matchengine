@@ -30,6 +30,10 @@ configs/push.jwt-dev.json
 configs/dev-mtls/
 /etc/trading/
 
+# Benchmark reports（保留 reports/.gitkeep）
+/reports/*
+!/reports/.gitkeep
+
 # Env & local data
 .env
 .env.*

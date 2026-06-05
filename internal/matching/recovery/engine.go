@@ -22,13 +22,35 @@ import (
 
 const defaultSnapshotEvery = 10000
 
+// WALGroupCommitConfig WAL 组提交。
+type WALGroupCommitConfig struct {
+	SyncEveryRecords    int // <=1：每条 fsync；>1：批量 fsync
+	SyncIntervalMs      int
+	ConsumerBatchMax    int
+	ConsumerBatchWaitMs int
+}
+
+// GroupCommitEnabled 是否启用组提交。
+func (c WALGroupCommitConfig) GroupCommitEnabled() bool {
+	return c.SyncEveryRecords > 1 || c.SyncIntervalMs > 0
+}
+
 // Config 持久化撮合引擎配置。
 type Config struct {
-	ShardID          string
-	DataDir          string
-	SnapshotEvery    uint64 // 每 N 条命令触发快照；0 表示默认 10000
-	SymbolRegistry   *symbolrules.Registry
-	Metrics          *metrics.Metrics
+	ShardID        string
+	DataDir        string
+	SnapshotEvery  uint64 // 每 N 条命令触发快照；0 表示默认 10000
+	WALGroupCommit WALGroupCommitConfig
+	SymbolRegistry *symbolrules.Registry
+	Metrics        *metrics.Metrics
+}
+
+// WALWriterConfig 转为 pkg/wal 写配置。
+func (c Config) WALWriterConfig() wal.FileWriterConfig {
+	return wal.FileWriterConfig{
+		SyncEveryRecords: c.WALGroupCommit.SyncEveryRecords,
+		SyncIntervalMs:   c.WALGroupCommit.SyncIntervalMs,
+	}
 }
 
 // Engine 持久化分片：先写 WAL 再改内存，支持快照与重启恢复。
@@ -44,6 +66,7 @@ type Engine struct {
 	recovered   uint64
 	snapshotSeq uint64
 	seen        map[uint64]struct{}
+	pending     []stagedItem
 	mu          sync.Mutex
 }
 
@@ -58,11 +81,22 @@ func Open(cfg Config) (*Engine, error) {
 	if cfg.SnapshotEvery == 0 {
 		cfg.SnapshotEvery = defaultSnapshotEvery
 	}
+	if cfg.WALGroupCommit.SyncEveryRecords <= 0 {
+		cfg.WALGroupCommit.SyncEveryRecords = 1
+	}
+	if cfg.WALGroupCommit.GroupCommitEnabled() {
+		if cfg.WALGroupCommit.ConsumerBatchMax <= 0 {
+			cfg.WALGroupCommit.ConsumerBatchMax = cfg.WALGroupCommit.SyncEveryRecords
+		}
+		if cfg.WALGroupCommit.ConsumerBatchWaitMs <= 0 {
+			cfg.WALGroupCommit.ConsumerBatchWaitMs = 2
+		}
+	}
 
 	walDir := filepath.Join(cfg.DataDir, "wal", cfg.ShardID)
 	snapRoot := filepath.Join(cfg.DataDir, "snapshots", cfg.ShardID)
 
-	w, err := wal.OpenFileWriter(walDir, wal.FileWriterConfig{})
+	w, err := wal.OpenFileWriter(walDir, cfg.WALWriterConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -218,13 +252,39 @@ func (e *Engine) LookupOrderPresence(symbol string, orderID uint64) presence.Kin
 }
 
 // ApplyNewOrder 先写 WAL 再撮合；重复 order_id 幂等跳过。
+// 组提交模式下：单条命令 staging 后立即 CommitBatch（CLI/测试）；Kafka 路径用 ProcessBatch。
 func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.wal.GroupCommitEnabled() {
+		if err := e.stageNewOrderLocked(cmd); err != nil {
+			return nil, err
+		}
+		out, err := e.commitBatchLocked()
+		if err != nil {
+			return nil, err
+		}
+		if len(out) == 0 {
+			return nil, nil
+		}
+		o := out[0]
+		if o.ReadOnly {
+			return nil, engine.ErrSymbolReadOnly
+		}
+		if o.Duplicate {
+			return nil, nil
+		}
+		return o.Trades, nil
+	}
+
+	return e.applyNewOrderImmediateLocked(cmd)
+}
+
+func (e *Engine) applyNewOrderImmediateLocked(cmd *matchingv1.NewOrderCommand) ([]engine.Trade, error) {
 	if cmd == nil || cmd.GetOrder() == nil {
 		return nil, fmt.Errorf("recovery: new order command is invalid")
 	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	symbolName := cmd.GetOrder().GetSymbol()
 	if e.shard.IsReadOnly(symbolName) {
@@ -244,9 +304,9 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 		return nil, fmt.Errorf("recovery: marshal new order: %w", err)
 	}
 
-	seq := e.wal.LastSeq() + 1
 	walStart := time.Now()
-	if err := e.wal.Append(seq, wal.EventTypeNewOrder, payload); err != nil {
+	seq, err := e.wal.AppendNext(wal.EventTypeNewOrder, payload)
+	if err != nil {
 		return nil, err
 	}
 	if e.cfg.Metrics != nil {
@@ -269,6 +329,21 @@ func (e *Engine) ApplyNewOrder(cmd *matchingv1.NewOrderCommand) ([]engine.Trade,
 
 // ApplyCancel 先写 WAL 再撤单；订单不存在时幂等忽略。
 func (e *Engine) ApplyCancel(cmd *matchingv1.CancelOrderCommand) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.wal.GroupCommitEnabled() {
+		if err := e.stageCancelLocked(cmd); err != nil {
+			return err
+		}
+		_, err := e.commitBatchLocked()
+		return err
+	}
+
+	return e.applyCancelImmediateLocked(cmd)
+}
+
+func (e *Engine) applyCancelImmediateLocked(cmd *matchingv1.CancelOrderCommand) error {
 	if cmd == nil {
 		return fmt.Errorf("recovery: cancel command is nil")
 	}
@@ -276,17 +351,14 @@ func (e *Engine) ApplyCancel(cmd *matchingv1.CancelOrderCommand) error {
 		return fmt.Errorf("recovery: symbol and order_id are required")
 	}
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	payload, err := proto.Marshal(cmd)
 	if err != nil {
 		return fmt.Errorf("recovery: marshal cancel: %w", err)
 	}
 
-	seq := e.wal.LastSeq() + 1
 	walStart := time.Now()
-	if err := e.wal.Append(seq, wal.EventTypeCancelOrder, payload); err != nil {
+	seq, err := e.wal.AppendNext(wal.EventTypeCancelOrder, payload)
+	if err != nil {
 		return err
 	}
 	if e.cfg.Metrics != nil {
