@@ -2,10 +2,15 @@
 
 可执行脚本：[e2e-api.sh](./e2e-api.sh)
 
+**撮合/资产数值校验**（停服 → `reset-dev.sh` → 启服 → 订单/成交/余额断言）：[e2e-accuracy.sh](./e2e-accuracy.sh)，说明见 [e2e-accuracy.md](./e2e-accuracy.md)。
+
 ```bash
 # 启动全部服务后（static，默认）
 ./scripts/dev.sh start --build
 ./scripts/e2e-api.sh          # 全流程：需 jq，对 health/充值/撮合/订单/成交/行情做断言
+
+# 干净环境 + 数值守恒（推荐发版前跑）
+./scripts/e2e-accuracy.sh
 
 # JWT + scope 联调（Gateway/Push 走 jwt 配置）
 ./scripts/dev.sh start --build --auth --jwt
