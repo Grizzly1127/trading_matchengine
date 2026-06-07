@@ -2,6 +2,10 @@
   "grpc_listen": ":50051",
   "metrics_listen": ":9104",
   "database_url": "postgres://trading:trading@postgres:5432/trading?sslmode=disable",
+  "database": {
+    "max_conns": 50,
+    "relay_max_conns": 20
+  },
   "migrate_on_start": true,
   "default_symbol": "BTC-USDT",
   "symbols_file": "/app/config/symbols.json",
@@ -34,7 +38,15 @@
     "group_id": "order-service",
     "partition": 0,
     "consumer_enabled": true,
-    "consumer_start_offset": -1
+    "consumer_start_offset": -1,
+    "batch_size": 500,
+    "batch_timeout_ms": 5
+  },
+  "outbox_relay": {
+    "poll_interval_ms": 20,
+    "batch_size": 500,
+    "max_retry": 100,
+    "workers": 4
   },
   "reconciler": {
     "enabled": true,

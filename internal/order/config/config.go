@@ -12,6 +12,7 @@ type Config struct {
 	GRPCListen     string                      `json:"grpc_listen"`
 	MetricsListen  string                      `json:"metrics_listen"`
 	DatabaseURL    string                      `json:"database_url"`
+	Database       DatabaseConfig              `json:"database"`
 	MigrateOnStart bool                        `json:"migrate_on_start"`
 	DefaultSymbol  string                      `json:"default_symbol"`
 	SymbolsFile    string                      `json:"symbols_file"`
@@ -20,6 +21,7 @@ type Config struct {
 	MarketData     MarketDataConfig            `json:"marketdata"`
 	Matching       MatchingConfig              `json:"matching"`
 	Kafka          KafkaConfig                 `json:"kafka"`
+	OutboxRelay    OutboxRelayConfig           `json:"outbox_relay"`
 	Redis          RedisConfig                 `json:"redis"`
 	Idempotency    IdempotencyConfig           `json:"idempotency"`
 	Reconciler     ReconcilerConfig            `json:"reconciler"`
@@ -74,6 +76,9 @@ type KafkaConfig struct {
 	ConsumerEnabled bool     `json:"consumer_enabled"`
 	// ConsumerStartOffset：-1 从最新；0 从最早（开发回放）。
 	ConsumerStartOffset int64 `json:"consumer_start_offset"`
+	// BatchSize / BatchTimeoutMs 供 Outbox Relay Kafka 发布（0 用 applyDefaults）。
+	BatchSize      int `json:"batch_size"`
+	BatchTimeoutMs int `json:"batch_timeout_ms"`
 }
 
 // LogConfig 控制结构化日志。
@@ -156,6 +161,8 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 		c.MigrateOnStart = true
 	}
 	c.applyKafkaDefaults(raw)
+	c.applyDatabaseDefaults(raw)
+	c.applyOutboxRelayDefaults(raw)
 	c.applyRedisDefaults(raw)
 	c.applyIdempotencyDefaults(raw)
 	c.applyReconcilerDefaults(raw)
@@ -217,6 +224,27 @@ func (c *Config) applyKafkaDefaults(raw map[string]json.RawMessage) {
 		}
 	} else if c.Kafka.ConsumerStartOffset == 0 {
 		c.Kafka.ConsumerStartOffset = -1
+	}
+	if c.Kafka.BatchSize <= 0 {
+		c.Kafka.BatchSize = 500
+	}
+	if c.Kafka.BatchTimeoutMs <= 0 {
+		c.Kafka.BatchTimeoutMs = 5
+	}
+}
+
+func (c *Config) applyOutboxRelayDefaults(_ map[string]json.RawMessage) {
+	if c.OutboxRelay.PollIntervalMs <= 0 {
+		c.OutboxRelay.PollIntervalMs = 20
+	}
+	if c.OutboxRelay.BatchSize <= 0 {
+		c.OutboxRelay.BatchSize = 500
+	}
+	if c.OutboxRelay.MaxRetry <= 0 {
+		c.OutboxRelay.MaxRetry = 100
+	}
+	if c.OutboxRelay.Workers <= 0 {
+		c.OutboxRelay.Workers = 1
 	}
 }
 

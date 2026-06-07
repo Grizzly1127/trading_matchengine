@@ -28,6 +28,9 @@ func TestLoad_defaults(t *testing.T) {
 	if cfg.SnapshotEvery != 10000 {
 		t.Fatalf("snapshot_every = %d, want 10000", cfg.SnapshotEvery)
 	}
+	if cfg.SnapshotIntervalSeconds != 300 {
+		t.Fatalf("snapshot_interval_seconds = %d, want 300", cfg.SnapshotIntervalSeconds)
+	}
 	if !cfg.SnapshotOnExit {
 		t.Fatal("snapshot_on_exit should default true")
 	}
@@ -46,6 +49,7 @@ func TestLoad_fullFile(t *testing.T) {
   "data_dir": "/var/data",
   "shard_id": "shard-1",
   "snapshot_every": 500,
+  "snapshot_interval_seconds": 60,
   "snapshot_on_exit": false,
   "commands_file": "orders.jsonl",
   "default_symbol": "ETH-USDT",
@@ -62,7 +66,7 @@ func TestLoad_fullFile(t *testing.T) {
 	if cfg.DataDir != "/var/data" || cfg.ShardID != "shard-1" {
 		t.Fatalf("cfg = %+v", cfg)
 	}
-	if cfg.SnapshotEvery != 500 || cfg.SnapshotOnExit {
+	if cfg.SnapshotEvery != 500 || cfg.SnapshotIntervalSeconds != 60 || cfg.SnapshotOnExit {
 		t.Fatalf("snapshot cfg = %+v", cfg)
 	}
 	if cfg.CommandsFile != "orders.jsonl" || cfg.DefaultSymbol != "ETH-USDT" {

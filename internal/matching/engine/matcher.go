@@ -69,10 +69,10 @@ func matchAgainstBook(b *OrderBook, book *skiplist.SkipList, taker Order, comman
 			delete(b.orderMap, maker.OrderID)
 		} else {
 			book.Delete(maker)
+			maker.UpdateTime = time.Now()
 			book.Insert(maker)
 			b.orderMap[maker.OrderID] = maker
 		}
-		maker.UpdateTime = time.Now()
 
 		taker.Remaining = taker.Remaining.Sub(matchQty)
 		taker.UpdateTime = time.Now()

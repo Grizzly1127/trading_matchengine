@@ -34,7 +34,15 @@
     "group_id": "order-service",
     "partition": 0,
     "consumer_enabled": true,
-    "consumer_start_offset": -1
+    "consumer_start_offset": -1,
+    "batch_size": 500,
+    "batch_timeout_ms": 5
+  },
+  "outbox_relay": {
+    "poll_interval_ms": 20,
+    "batch_size": 500,
+    "max_retry": 100,
+    "workers": 4
   },
   "reconciler": {
     "enabled": true,

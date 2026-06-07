@@ -21,8 +21,9 @@ type Config struct {
 	DataDir         string                      `json:"data_dir"`
 	ShardID         string                      `json:"shard_id"`
 	ShardsFile      string                      `json:"shards_file"`
-	SnapshotEvery   uint64                      `json:"snapshot_every"`
-	SnapshotOnExit  bool                        `json:"snapshot_on_exit"`
+	SnapshotEvery           uint64                      `json:"snapshot_every"`
+	SnapshotIntervalSeconds int                         `json:"snapshot_interval_seconds"` // 0 表示禁用；默认 300
+	SnapshotOnExit          bool                        `json:"snapshot_on_exit"`
 	WALGroupCommit  WALGroupCommitConfig        `json:"wal_group_commit"`
 	CommandsFile    string                      `json:"commands_file"`
 	DefaultSymbol   string                      `json:"default_symbol"`
@@ -114,6 +115,11 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.SnapshotEvery == 0 {
 		c.SnapshotEvery = 10000
 	}
+	if _, ok := raw["snapshot_interval_seconds"]; !ok {
+		if c.SnapshotIntervalSeconds <= 0 {
+			c.SnapshotIntervalSeconds = 300
+		}
+	}
 	if _, ok := raw["snapshot_on_exit"]; !ok {
 		c.SnapshotOnExit = true
 	}
@@ -175,6 +181,14 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 			}
 		}
 	}
+}
+
+// SnapshotInterval 返回定时快照间隔；0 表示禁用。
+func (c Config) SnapshotInterval() time.Duration {
+	if c.SnapshotIntervalSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(c.SnapshotIntervalSeconds) * time.Second
 }
 
 func (c Config) validate() error {

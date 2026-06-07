@@ -31,7 +31,7 @@
 - [x] `pkg/snapshot`：protobuf 快照
 - [x] `internal/matching/recovery`：manifest → snapshot → WAL 回放
 - [x] 先写 WAL 再改内存（架构约束 #11）
-- [x] 定期/按条数快照（`snapshot_every`）
+- [x] 定期/按条数快照（`snapshot_every`、`snapshot_interval_seconds`）
 - [x] 重启恢复后 orderbook 合法性断言（`ValidateWithOrderMap`）
 - [x] `order_id` 去重，避免重复撮合
 
@@ -211,6 +211,7 @@
 - [x] WAL 组提交（`wal_group_commit`、`Stage`+`CommitBatch`、`ProcessBatch`；见 [l2-optimization-roadmap.md](./l2-optimization-roadmap.md) §4.1）
 - [ ] L2 其余优化（Kafka 热路径 / 协议聚合等，见路线图 §4.2+）
 - [x] L0 微基准 + L2/L3 脚本骨架（`make bench-l0`、`scripts/bench/`、`cmd/bench-producer`）
+- [ ] L3 Outbox Relay 优化（P0/P1 已实现；复测投递吞吐，Phase 2 见 [l3-optimization-roadmap.md](./l3-optimization-roadmap.md)）
 - [ ] 按 [docs/benchmark.md](../benchmark.md) 跑通 M3 并归档 `reports/` PASS（优先 `metrics-load-window.txt`）
 - [ ] 撮合核心 / recovery 持续保持覆盖率 ≥ 80%
 

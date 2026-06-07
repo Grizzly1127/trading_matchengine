@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -125,6 +126,10 @@ func main() {
 	}
 	m.SetWalLastSeq(eng.LastSeq())
 
+	if interval := cfg.SnapshotInterval(); interval > 0 {
+		go startPeriodicSnapshot(ctx, log, eng, interval)
+	}
+
 	var runErr error
 	if cfg.Kafka.Enabled {
 		runErr = runKafka(ctx, cfg, eng, log, m)
@@ -135,7 +140,8 @@ func main() {
 	lastSeq := eng.LastSeq()
 	if err := cli.Shutdown(eng, cfg.SnapshotOnExit); err != nil {
 		log.Error().Err(err).Msg("shutdown")
-		if runErr == nil {
+		// 退出快照失败不覆盖已发生的 consumer 错误；也不因快照 alone fatal。
+		if runErr == nil && !strings.Contains(err.Error(), "snapshot on exit") {
 			runErr = err
 		}
 	} else if cfg.SnapshotOnExit {
@@ -277,6 +283,21 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 		BatchMax:  batchMax,
 		BatchWait: batchWait,
 	})
+}
+
+func startPeriodicSnapshot(ctx context.Context, log zerolog.Logger, eng *recovery.Engine, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := eng.SnapshotIfStale(); err != nil {
+				log.Error().Err(err).Dur("interval", interval).Msg("periodic snapshot failed")
+			}
+		}
+	}
 }
 
 func pollKafkaLag(ctx context.Context, reader *kafka.CommandReader, m *metrics.Metrics, log zerolog.Logger) {

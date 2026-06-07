@@ -16,10 +16,7 @@
   "metrics_listen": ":9101",
   "admin_grpc_listen": ":50061",
   "order_service": {
-    "enabled": true,
-    "grpc_addr": "localhost:50051",
-    "dial_timeout_seconds": 3,
-    "recovery_verify_timeout_seconds": 30
+    "enabled": false
   },
   "kafka": {
     "enabled": true,

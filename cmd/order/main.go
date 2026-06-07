@@ -31,9 +31,9 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/order/service"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
-	"github.com/Grizzly1127/trading_matchengine/pkg/shardmgr"
-	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
+	"github.com/Grizzly1127/trading_matchengine/pkg/redis"
+	"github.com/Grizzly1127/trading_matchengine/pkg/shardmgr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -72,11 +72,17 @@ func main() {
 	log := logRes.Logger
 	ctx := context.Background()
 
-	pool, err := repository.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := repository.NewPool(ctx, cfg.DatabaseURL, cfg.Database.MaxConns)
 	if err != nil {
 		log.Fatal().Err(err).Msg("connect database")
 	}
 	defer pool.Close()
+
+	relayPool, err := repository.NewPool(ctx, cfg.DatabaseURL, cfg.Database.RelayMaxConns)
+	if err != nil {
+		log.Fatal().Err(err).Msg("connect relay database pool")
+	}
+	defer relayPool.Close()
 
 	if cfg.MigrateOnStart {
 		if err := repository.MigrateUp(ctx, pool); err != nil {
@@ -100,6 +106,7 @@ func main() {
 	}
 
 	repo := repository.New(pool, rulesCfg.Assets)
+	repo.SetRelayPool(relayPool)
 
 	var matchingClient *matchengine.Client
 	if cfg.Matching.Enabled && cfg.Matching.GRPCAddr != "" {
@@ -112,7 +119,7 @@ func main() {
 		}
 	}
 
-	writer := kafka.NewEventWriter(kafka.WriterConfig{Brokers: cfg.Kafka.Brokers})
+	writer := kafka.NewEventWriter(cfg.KafkaWriterConfig())
 	defer writer.Close()
 	mdClient, err := marketdata.Connect(ctx, cfg.MarketData.GRPCAddr, time.Duration(cfg.MarketData.DialTimeoutSeconds)*time.Second)
 	if err != nil {
@@ -152,13 +159,19 @@ func main() {
 		go startOrderMetricsCollector(ctx, log, repo, m)
 	}
 
-	relayCfg := outbox.RelayConfig{Partition: cfg.Kafka.Partition, Resolver: shardMgr}
+	relayCfg := cfg.OutboxRelayRuntime(cfg.Kafka.Partition, shardMgr)
 	relay := &outbox.Relay{
-		Store:  repo,
-		Writer: writer,
-		Log:    log.With().Str("component", "outbox_relay").Logger(),
-		Config: relayCfg,
+		Store:   repo.RelayStore(),
+		Writer:  writer,
+		Log:     log.With().Str("component", "outbox_relay").Logger(),
+		Config:  relayCfg,
+		Metrics: m,
 	}
+	log.Info().
+		Int("outbox_workers", relayCfg.Workers).
+		Int("db_max_conns", cfg.Database.MaxConns).
+		Int("db_relay_max_conns", cfg.Database.RelayMaxConns).
+		Msg("outbox relay starting")
 	go relay.Run(ctx)
 
 	reconcileSched := &reconciler.Scheduler{

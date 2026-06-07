@@ -218,6 +218,7 @@ TPS_max ≈ 1 / 平均每条墙钟耗时（processing，含 WAL + 撮合 + Publi
 | 资源 | 路径 |
 |------|------|
 | 压测方案 | [docs/benchmark.md](../benchmark.md) |
+| L3 Outbox 优化 | [l3-optimization-roadmap.md](./l3-optimization-roadmap.md) |
 | L2 脚本 | `scripts/bench/run-l2.sh` |
 | 环境重置 | `scripts/bench/reset-l2-env.sh` |
 | WAL 实现 | `pkg/wal/writer.go` |

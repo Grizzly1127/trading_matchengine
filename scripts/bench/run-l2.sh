@@ -29,6 +29,7 @@ SEED_DEPTH="${SEED_DEPTH:-500}"
 SKIP_SEED=false
 FULL_BENCH=false
 RESET_L2_ENV=true
+RESET_L2_WITH_DB=false
 RESTART_MATCHING=true
 COLLECT_PPROF=true
 PROFILE_SEC=0
@@ -37,6 +38,8 @@ TRACE_SEC="${TRACE_SEC:-5}"
 WAIT_LAG_TIMEOUT="${WAIT_LAG_TIMEOUT:-600}"
 METRICS_URL="${METRICS_URL:-http://localhost:9101/metrics}"
 PPROF_BASE="${PPROF_BASE:-http://localhost:9101}"
+# L2 直连 Kafka，不依赖 Order；关闭启动对账，避免 L3 残留 DB / order 未起导致 fatal
+MATCHING_BENCH_CONFIG="${MATCHING_BENCH_CONFIG:-$ROOT/configs/matching.bench-l2.json}"
 
 usage() {
   cat <<EOF
@@ -52,6 +55,7 @@ usage() {
   --full                   Phase4 全量：seed=5000 warmup=10000 rate=5000 duration=5m
   --no-wait-lag            正式压测前不等待 lag 回落（不推荐）
   --no-reset-env           不清理 WAL/Kafka（多轮 orderbook/积压会污染，仅调试）
+  --with-db                reset 时清空 PostgreSQL 并 migrate（L3 后切 L2 时推荐）
   --no-restart             不重启 matching（累积直方图会跨轮污染，仅调试）
   --no-pprof               不在 load 窗口采集 cpu/block/trace
   --profile-sec N          CPU/block 采样秒数（默认 min(30, load时长-10)）
@@ -75,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --full) FULL_BENCH=true; shift ;;
     --no-wait-lag) WAIT_LAG_TIMEOUT=0; shift ;;
     --no-reset-env) RESET_L2_ENV=false; shift ;;
+    --with-db) RESET_L2_WITH_DB=true; shift ;;
     --no-restart) RESTART_MATCHING=false; shift ;;
     --no-pprof) COLLECT_PPROF=false; shift ;;
     --profile-sec) PROFILE_SEC="$2"; shift 2 ;;
@@ -165,19 +170,41 @@ wait_metrics_up() {
   return 1
 }
 
+matching_start_hint() {
+  local log_file="$ROOT/logs/matching.log"
+  if [[ -f "$log_file" ]]; then
+    log "matching 最近日志:"
+    tail -3 "$log_file" | while IFS= read -r line; do log "  $line"; done
+  fi
+  log "配置: $MATCHING_BENCH_CONFIG（order_service 已关闭，L2 无需 order 进程）"
+  log "L3 后切 L2 请加 --with-db 清 PostgreSQL"
+}
+
 if [[ "$RESET_L2_ENV" == true ]]; then
   chmod +x "$ROOT/scripts/bench/reset-l2-env.sh"
-  log "L2 环境重置（WAL + Kafka，可比多轮压测）..."
-  "$ROOT/scripts/bench/reset-l2-env.sh"
+  reset_args=()
+  if [[ "$RESET_L2_WITH_DB" == true ]]; then
+    log "L2 环境重置（WAL + Kafka + PostgreSQL，L3 后切 L2）..."
+    reset_args+=(--with-db)
+  else
+    log "L2 环境重置（WAL + Kafka，可比多轮压测）..."
+  fi
+  "$ROOT/scripts/bench/reset-l2-env.sh" "${reset_args[@]}"
 elif [[ "$RESTART_MATCHING" == true ]]; then
   log "跳过环境重置（--no-reset-env）；仅 stop matching 以便 restart ..."
   bash "$ROOT/scripts/matching.sh" stop || true
 fi
 
 if [[ "$RESTART_MATCHING" == true ]]; then
-  log "重启 matching（清空进程内 Prometheus 直方图）..."
-  "$ROOT/scripts/matching.sh" restart --build
-  wait_metrics_up || die "restart 后 metrics 不可达 ($METRICS_URL)"
+  if [[ ! -f "$MATCHING_BENCH_CONFIG" ]]; then
+    die "L2 matching 配置不存在: $MATCHING_BENCH_CONFIG"
+  fi
+  log "重启 matching（L2 配置: ${MATCHING_BENCH_CONFIG##*/}，跳过 order 对账）..."
+  MATCHING_CONFIG="$MATCHING_BENCH_CONFIG" "$ROOT/scripts/matching.sh" restart --build
+  if ! wait_metrics_up; then
+    matching_start_hint
+    die "restart 后 metrics 不可达 ($METRICS_URL)"
+  fi
 else
   if ! fetch_metrics_raw >/dev/null 2>&1; then
     die "Matching metrics 不可达 ($METRICS_URL)，请先启动 matching（./scripts/dev.sh start --build）"

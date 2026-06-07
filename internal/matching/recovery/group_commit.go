@@ -144,8 +144,9 @@ func (e *Engine) commitBatchLocked() ([]CommandOutcome, error) {
 			if e.cfg.Metrics != nil {
 				e.cfg.Metrics.SetWalLastSeq(item.seq)
 			}
-			if err := e.maybeSnapshot(item.seq); err != nil {
-				return nil, err
+			if snapErr := e.maybeSnapshot(item.seq); snapErr != nil {
+				// 快照失败不阻断已 apply 的热路径；下轮计数/定时触发会重试。
+				_ = snapErr
 			}
 			out[i] = CommandOutcome{Trades: trades, WalSeq: item.seq}
 		case stagedCancel:
@@ -156,8 +157,8 @@ func (e *Engine) commitBatchLocked() ([]CommandOutcome, error) {
 			if e.cfg.Metrics != nil {
 				e.cfg.Metrics.SetWalLastSeq(item.seq)
 			}
-			if err := e.maybeSnapshot(item.seq); err != nil {
-				return nil, err
+			if snapErr := e.maybeSnapshot(item.seq); snapErr != nil {
+				_ = snapErr
 			}
 			out[i] = CommandOutcome{WalSeq: item.seq}
 		default:

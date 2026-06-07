@@ -1,0 +1,3 @@
+// Package integration 存放 order 服务的集成测试。
+// 运行: go test -tags=integration ./internal/order/integration/...
+package integration

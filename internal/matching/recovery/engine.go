@@ -63,9 +63,10 @@ type Engine struct {
 	walDir      string
 	snapRoot    string
 	manifest    string
-	recovered   uint64
-	snapshotSeq uint64
-	seen        map[uint64]struct{}
+	recovered      uint64
+	snapshotSeq    uint64
+	lastSnapshotAt time.Time
+	seen           map[uint64]struct{}
 	pending     []stagedItem
 	mu          sync.Mutex
 }
@@ -321,9 +322,7 @@ func (e *Engine) applyNewOrderImmediateLocked(cmd *matchingv1.NewOrderCommand) (
 	if e.cfg.Metrics != nil {
 		e.cfg.Metrics.SetWalLastSeq(seq)
 	}
-	if err := e.maybeSnapshot(seq); err != nil {
-		return trades, err
-	}
+	_ = e.maybeSnapshot(seq)
 	return trades, nil
 }
 
@@ -372,7 +371,8 @@ func (e *Engine) applyCancelImmediateLocked(cmd *matchingv1.CancelOrderCommand) 
 	if e.cfg.Metrics != nil {
 		e.cfg.Metrics.SetWalLastSeq(seq)
 	}
-	return e.maybeSnapshot(seq)
+	_ = e.maybeSnapshot(seq)
+	return nil
 }
 
 func (e *Engine) recover() error {
@@ -436,6 +436,9 @@ func (e *Engine) loadSnapshots() (uint64, error) {
 		}
 	}
 	e.snapshotSeq = recoveredOffset
+	if manifest != nil && manifest.GetUpdatedAtUnixNano() > 0 {
+		e.lastSnapshotAt = time.Unix(0, manifest.GetUpdatedAtUnixNano())
+	}
 	return recoveredOffset, nil
 }
 
@@ -535,6 +538,17 @@ func (e *Engine) maybeSnapshot(seq uint64) error {
 	return e.writeSnapshots(seq)
 }
 
+// SnapshotIfStale 若 WAL seq 大于上次快照 seq，立即写快照（供定时触发；空闲时 no-op）。
+func (e *Engine) SnapshotIfStale() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	seq := e.wal.LastSeq()
+	if seq <= e.snapshotSeq {
+		return nil
+	}
+	return e.writeSnapshots(seq)
+}
+
 // SnapshotNow 立即对所有已注册 symbol 写快照并更新 manifest。
 func (e *Engine) SnapshotNow() error {
 	e.mu.Lock()
@@ -571,7 +585,12 @@ func (e *Engine) writeSnapshots(seq uint64) error {
 		manifest.SymbolSeq[sym] = seq
 	}
 
-	return snapshot.SaveManifest(e.manifest, manifest)
+	if err := snapshot.SaveManifest(e.manifest, manifest); err != nil {
+		return err
+	}
+	e.snapshotSeq = seq
+	e.lastSnapshotAt = time.Now()
+	return nil
 }
 
 func listSymbolDirs(root string) ([]string, error) {

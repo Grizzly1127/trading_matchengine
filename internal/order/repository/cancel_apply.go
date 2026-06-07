@@ -88,20 +88,9 @@ FOR UPDATE`
 }
 
 func insertCancelOutbox(ctx context.Context, tx pgx.Tx, order *Order, topic string) error {
-	const insertOutbox = `
-INSERT INTO order_outbox (aggregate_id, event_type, payload, topic, partition_key)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id`
-
-	var outboxID uint64
-	if err := tx.QueryRow(ctx, insertOutbox,
-		order.ID,
-		outbox.EventTypeCancelOrder,
-		[]byte{},
-		topic,
-		order.Symbol,
-	).Scan(&outboxID); err != nil {
-		return fmt.Errorf("insert cancel outbox: %w", err)
+	outboxID, err := allocateOutboxID(ctx, tx)
+	if err != nil {
+		return err
 	}
 
 	payload, err := outbox.BuildCancelOrderPayload(order.Symbol, order.ID, outboxID)
@@ -109,9 +98,5 @@ RETURNING id`
 		return fmt.Errorf("build cancel payload: %w", err)
 	}
 
-	const updatePayload = `UPDATE order_outbox SET payload = $1 WHERE id = $2`
-	if _, err := tx.Exec(ctx, updatePayload, payload, outboxID); err != nil {
-		return fmt.Errorf("update cancel outbox payload: %w", err)
-	}
-	return nil
+	return insertOutboxRow(ctx, tx, outboxID, order.ID, outbox.EventTypeCancelOrder, payload, topic, order.Symbol)
 }
