@@ -1,0 +1,57 @@
+{
+  "data_dir": "data",
+  "shard_id": "shard-0",
+  "shards_file": "configs/shards.json",
+  "snapshot_every": 1000000,
+  "snapshot_interval_seconds": 300,
+  "snapshot_on_exit": true,
+  "wal_group_commit": {
+    "sync_every_records": 64,
+    "sync_interval_ms": 5,
+    "consumer_batch_max": 64,
+    "consumer_batch_wait_ms": 3
+  },
+  "default_symbol": "BTC-USDT",
+  "symbols_file": "configs/symbols.json",
+  "metrics_listen": ":9101",
+  "admin_grpc_listen": ":50061",
+  "order_service": {
+    "enabled": false
+  },
+  "event_outbox": {
+    "enabled": true,
+    "sync_every_records": 64,
+    "sync_interval_ms": 5
+  },
+  "event_relay": {
+    "poll_interval_ms": 2,
+    "batch_size": 256,
+    "workers": 1
+  },
+  "kafka": {
+    "enabled": true,
+    "brokers": ["localhost:9092"],
+    "group_id": "matching-shard-0",
+    "command_topic": "order.commands",
+    "match_topic": "match.events",
+    "trade_topic": "trade.events",
+    "partition": 0,
+    "required_acks": "one",
+    "batch_size": 512,
+    "batch_timeout_ms": 10,
+    "compression": "lz4"
+  },
+  "log": {
+    "level": "info",
+    "dev": true,
+    "file": "logs/matching.log",
+    "async": true,
+    "buffer_size": 512,
+    "max_size_mb": 100,
+    "max_age_days": 7,
+    "max_backups": 30,
+    "compress": true,
+    "local_time": true,
+    "rotate_daily": true
+  }
+}

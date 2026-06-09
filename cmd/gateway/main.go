@@ -13,9 +13,12 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/client"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
+	gwmetrics "github.com/Grizzly1127/trading_matchengine/internal/gateway/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/server"
 	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog"
 )
 
 func main() {
@@ -96,10 +99,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	gwMet := gwmetrics.New()
+	if cfg.MetricsListen != "" {
+		go startGatewayMetricsHTTP(ctx, log, cfg.MetricsListen)
+	}
+
 	router := server.NewRouter(server.Deps{
 		Log:        log,
 		Config:     cfg,
 		Verifier:   verifier,
+		Metrics:    gwMet,
 		Order:      orderClients.OrderClient,
 		Balance:    orderClients.BalanceClient,
 		MarketData: mdClients.Client,
@@ -144,5 +153,25 @@ func main() {
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("http shutdown")
+	}
+}
+
+func startGatewayMetricsHTTP(ctx context.Context, log zerolog.Logger, addr string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	log.Info().Str("listen", addr).Msg("gateway metrics listening")
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Error().Err(err).Msg("gateway metrics serve")
 	}
 }

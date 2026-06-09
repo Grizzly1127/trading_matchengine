@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/convert"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/grpcerr"
+	gwmetrics "github.com/Grizzly1127/trading_matchengine/internal/gateway/metrics"
 	gwmw "github.com/Grizzly1127/trading_matchengine/internal/gateway/middleware"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/response"
 	commonv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/common/v1"
@@ -22,8 +24,9 @@ const maxOrderBodyBytes = 1 << 20
 
 // Orders 订单 REST handler。
 type Orders struct {
-	Orders orderv1.OrderServiceClient
-	Log    zerolog.Logger
+	Orders  orderv1.OrderServiceClient
+	Log     zerolog.Logger
+	Metrics *gwmetrics.Metrics
 }
 
 type placeOrderRequest struct {
@@ -39,6 +42,13 @@ type placeOrderRequest struct {
 
 // PlaceOrder POST /v1/orders
 func (h *Orders) PlaceOrder(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		if h.Metrics != nil {
+			h.Metrics.ObservePlaceOrder(time.Since(start))
+		}
+	}()
+
 	var body placeOrderRequest
 	if err := decodeJSON(w, r, &body); err != nil {
 		grpcerr.Write(w, r, grpcerr.BadRequest(err.Error()))

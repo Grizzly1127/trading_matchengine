@@ -391,7 +391,7 @@ docs/                   # API 与设计文档
 
 ## 设计要点（简）
 
-- **撮合热路径**：每 symbol 单线程；先 WAL `fsync` 再改 orderbook（见 `.cursor/rules/trading-engine-sla.mdc`）。
+- **撮合热路径**：每 symbol 单线程；先 WAL `fsync` 再改 orderbook。
 - **命令投递**：Order → Transactional Outbox → Kafka `order.commands`（分区由 Shard Manager 决定）。
 - **行情/K 线**：消费 `trade.events` / `match.events`，写 Redis，Push 扇出 WS。
 - **账务真相**：PostgreSQL；Redis 为缓存与推送。

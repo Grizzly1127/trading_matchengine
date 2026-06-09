@@ -16,16 +16,21 @@ type Metrics struct {
 	LastProcessedOffset atomic.Uint64
 	KafkaLag            atomic.Int64
 	WalLastSeq          atomic.Uint64
+	EventOutboxPending  atomic.Uint64
+	EventRelayPublished atomic.Uint64
 
-	processingLatency    prometheus.Histogram
-	walAppendLatency     prometheus.Histogram
-	walSyncLatency       prometheus.Histogram
-	walSyncBatchRecords  prometheus.Histogram
-	publishLatency       prometheus.Histogram
-	publishMatchLatency  prometheus.Histogram
-	publishTradeLatency  prometheus.Histogram
-	publishMatchEvents   prometheus.Histogram
-	publishTradeEvents   prometheus.Histogram
+	processingLatency      prometheus.Histogram
+	walAppendLatency       prometheus.Histogram
+	walSyncLatency         prometheus.Histogram
+	walSyncBatchRecords    prometheus.Histogram
+	eventOutboxSyncLatency prometheus.Histogram
+	publishLatency         prometheus.Histogram
+	publishMatchLatency    prometheus.Histogram
+	publishTradeLatency    prometheus.Histogram
+	publishMatchEvents     prometheus.Histogram
+	publishTradeEvents     prometheus.Histogram
+	eventRelayBatchSize    prometheus.Histogram
+	eventRelayDispatchMs   prometheus.Histogram
 }
 
 // New 创建指标并在默认 Registerer 上注册。
@@ -50,6 +55,11 @@ func New() *Metrics {
 			Name:    "matching_wal_sync_batch_records",
 			Help:    "WAL group commit: number of records included in each Sync batch",
 			Buckets: []float64{1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128},
+		}),
+		eventOutboxSyncLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_event_outbox_sync_latency_ms",
+			Help:    "Event outbox fdatasync wall time per ProcessBatch",
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 25, 50, 100},
 		}),
 		publishLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "matching_publish_latency_ms",
@@ -76,6 +86,16 @@ func New() *Metrics {
 			Help:    "Number of trade events published per command",
 			Buckets: []float64{0, 1, 2, 3, 5, 8, 13, 21, 34},
 		}),
+		eventRelayBatchSize: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_event_relay_batch_size",
+			Help:    "Event outbox relay claimed batch size per poll",
+			Buckets: []float64{1, 8, 16, 32, 64, 128, 256, 512},
+		}),
+		eventRelayDispatchMs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "matching_event_relay_dispatch_latency_ms",
+			Help:    "Event outbox relay dispatch latency in milliseconds",
+			Buckets: []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024},
+		}),
 	}
 	registerCounter("matching_commands_processed_total", "Successfully processed order.commands messages", &m.CommandsProcessed)
 	registerCounter("matching_commands_failed_total", "Failed order.commands processing attempts", &m.CommandsFailed)
@@ -89,16 +109,21 @@ func New() *Metrics {
 		return float64(m.KafkaLag.Load())
 	}))
 	registerGaugeUint64("matching_wal_last_seq", "Last WAL sequence number applied", &m.WalLastSeq)
+	registerGaugeUint64("matching_event_outbox_pending_count", "Unpublished event outbox records", &m.EventOutboxPending)
+	registerCounter("matching_event_relay_published_total", "Event outbox rows published to Kafka by relay", &m.EventRelayPublished)
 	prometheus.MustRegister(
 		m.processingLatency,
 		m.walAppendLatency,
 		m.walSyncLatency,
 		m.walSyncBatchRecords,
+		m.eventOutboxSyncLatency,
 		m.publishLatency,
 		m.publishMatchLatency,
 		m.publishTradeLatency,
 		m.publishMatchEvents,
 		m.publishTradeEvents,
+		m.eventRelayBatchSize,
+		m.eventRelayDispatchMs,
 	)
 	return m
 }
@@ -159,6 +184,42 @@ func (m *Metrics) ObserveWalGroupCommit(syncDur time.Duration, records int) {
 func (m *Metrics) ObserveCommandFailed() {
 	if m != nil {
 		m.CommandsFailed.Add(1)
+	}
+}
+
+// ObserveEventOutboxSync 记录 Event Outbox 批 sync 墙钟。
+func (m *Metrics) ObserveEventOutboxSync(d time.Duration) {
+	if m == nil || d <= 0 {
+		return
+	}
+	m.eventOutboxSyncLatency.Observe(float64(d.Milliseconds()))
+}
+
+// SetEventOutboxPending 更新未发布 outbox 估计值。
+func (m *Metrics) SetEventOutboxPending(n uint64) {
+	if m != nil {
+		m.EventOutboxPending.Store(n)
+	}
+}
+
+// ObserveRelayBatchSize 记录 relay 批大小。
+func (m *Metrics) ObserveRelayBatchSize(n int) {
+	if m != nil && n > 0 {
+		m.eventRelayBatchSize.Observe(float64(n))
+	}
+}
+
+// ObserveRelayDispatchLatency 记录 relay 投递耗时。
+func (m *Metrics) ObserveRelayDispatchLatency(d time.Duration) {
+	if m != nil && d > 0 {
+		m.eventRelayDispatchMs.Observe(float64(d.Milliseconds()))
+	}
+}
+
+// AddRelayPublished 累加 relay 已发布条数。
+func (m *Metrics) AddRelayPublished(n int) {
+	if m != nil && n > 0 {
+		m.EventRelayPublished.Add(uint64(n))
 	}
 }
 

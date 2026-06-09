@@ -72,6 +72,7 @@ MATCHING_CONFIG=configs/matching.json ./scripts/matching.sh start
 | `data_dir` | string | `data` | WAL、快照根目录 |
 | `shard_id` | string | `shard-0` | 分片 ID，对应 `data/wal/{shard_id}/` |
 | `snapshot_every` | uint | `10000` | 每 N 条 WAL 命令触发快照 |
+| `snapshot_interval_seconds` | int | `300` | 定时快照间隔（秒）；与计数触发取**较早者**；`0` 禁用 |
 | `snapshot_on_exit` | bool | `true` | SIGTERM 退出前写快照 |
 | `commands_file` | string | `""` | JSONL 模式：命令文件路径；空则读 stdin |
 | `default_symbol` | string | `BTC-USDT` | JSONL 未指定 `symbol` 时使用 |

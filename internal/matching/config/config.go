@@ -21,8 +21,9 @@ type Config struct {
 	DataDir         string                      `json:"data_dir"`
 	ShardID         string                      `json:"shard_id"`
 	ShardsFile      string                      `json:"shards_file"`
-	SnapshotEvery   uint64                      `json:"snapshot_every"`
-	SnapshotOnExit  bool                        `json:"snapshot_on_exit"`
+	SnapshotEvery           uint64                      `json:"snapshot_every"`
+	SnapshotIntervalSeconds int                         `json:"snapshot_interval_seconds"` // 0 表示禁用；默认 300
+	SnapshotOnExit          bool                        `json:"snapshot_on_exit"`
 	WALGroupCommit  WALGroupCommitConfig        `json:"wal_group_commit"`
 	CommandsFile    string                      `json:"commands_file"`
 	DefaultSymbol   string                      `json:"default_symbol"`
@@ -31,6 +32,8 @@ type Config struct {
 	MetricsListen   string                      `json:"metrics_listen"`
 	AdminGRPCListen string                      `json:"admin_grpc_listen"`
 	OrderService    OrderServiceConfig          `json:"order_service"`
+	EventOutbox     EventOutboxConfig           `json:"event_outbox"`
+	EventRelay      EventRelayConfig            `json:"event_relay"`
 	Kafka           KafkaConfig                 `json:"kafka"`
 	Log             LogConfig                   `json:"log"`
 }
@@ -114,6 +117,11 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.SnapshotEvery == 0 {
 		c.SnapshotEvery = 10000
 	}
+	if _, ok := raw["snapshot_interval_seconds"]; !ok {
+		if c.SnapshotIntervalSeconds <= 0 {
+			c.SnapshotIntervalSeconds = 300
+		}
+	}
 	if _, ok := raw["snapshot_on_exit"]; !ok {
 		c.SnapshotOnExit = true
 	}
@@ -132,6 +140,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 	c.applyKafkaDefaults(raw)
 	c.applyWALGroupCommitDefaults(raw)
+	c.applyEventOutboxDefaults(raw)
 	c.applyOrderServiceDefaults(raw)
 	c.applySymbolDefaults()
 	if c.Log.Level == "" {
@@ -177,6 +186,14 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 }
 
+// SnapshotInterval 返回定时快照间隔；0 表示禁用。
+func (c Config) SnapshotInterval() time.Duration {
+	if c.SnapshotIntervalSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(c.SnapshotIntervalSeconds) * time.Second
+}
+
 func (c Config) validate() error {
 	if strings.TrimSpace(c.ShardID) == "" {
 		return fmt.Errorf("config: shard_id is required")
@@ -202,6 +219,25 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func (c *Config) applyEventOutboxDefaults(raw map[string]json.RawMessage) {
+	if c.EventOutbox.SyncEveryRecords <= 0 {
+		c.EventOutbox.SyncEveryRecords = c.WALGroupCommit.SyncEveryRecords
+	}
+	if c.EventOutbox.SyncIntervalMs <= 0 {
+		c.EventOutbox.SyncIntervalMs = c.WALGroupCommit.SyncIntervalMs
+	}
+	if c.EventRelay.PollIntervalMs <= 0 {
+		c.EventRelay.PollIntervalMs = 2
+	}
+	if c.EventRelay.BatchSize <= 0 {
+		c.EventRelay.BatchSize = 256
+	}
+	if c.EventRelay.Workers <= 0 {
+		c.EventRelay.Workers = 1
+	}
+	_ = raw
 }
 
 func (c *Config) applyOrderServiceDefaults(raw map[string]json.RawMessage) {

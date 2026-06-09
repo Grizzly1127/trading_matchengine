@@ -76,3 +76,86 @@ func TestOrderBook_Restore_rejectsCrossedBook(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestOrderBook_groupCommitScenario_orderMapConsistent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stress in -short")
+	}
+	book := engine.NewOrderBook("BTC-USDT")
+	price := decimal.NewFromInt(65000)
+	qty := decimal.RequireFromString("0.001")
+	for i := uint64(1); i <= 551; i++ {
+		o := engine.Order{
+			OrderID: i, Symbol: "BTC-USDT", Side: engine.SideSell, Type: engine.OrderTypeLimit,
+			Price: price, Quantity: qty, Remaining: qty, UpdateTime: time.Now(),
+		}
+		if _, err := book.Match(o, i); err != nil {
+			t.Fatalf("sell %d: %v", i, err)
+		}
+	}
+	for i := uint64(552); i <= 100_000; i++ {
+		o := engine.Order{
+			OrderID: i, Symbol: "BTC-USDT", Side: engine.SideBuy, Type: engine.OrderTypeLimit,
+			Price: price, Quantity: qty, Remaining: qty, UpdateTime: time.Now(),
+		}
+		if _, err := book.Match(o, i); err != nil {
+			t.Fatalf("buy %d: %v", i, err)
+		}
+	}
+	snap := book.ExportSnapshot("shard-0", 100_000, time.Now())
+	if err := book.ValidateWithOrderMap(snap.GetOrderMap()); err != nil {
+		t.Fatalf("validate: %v map=%d active=%d", err, len(snap.GetOrderMap()), book.ActiveOrderCount())
+	}
+}
+
+func TestOrderBook_manyRestingBuys_orderMapConsistent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stress in -short")
+	}
+	book := engine.NewOrderBook("BTC-USDT")
+	price := decimal.NewFromInt(65000)
+	qty := decimal.RequireFromString("0.001")
+	for i := uint64(1); i <= 100_000; i++ {
+		o := engine.Order{
+			OrderID: i, Symbol: "BTC-USDT", Side: engine.SideBuy, Type: engine.OrderTypeLimit,
+			Price: price, Quantity: qty, Remaining: qty, UpdateTime: time.Now(),
+		}
+		if _, err := book.Match(o, i); err != nil {
+			t.Fatalf("match %d: %v", i, err)
+		}
+	}
+	snap := book.ExportSnapshot("shard-0", 100_000, time.Now())
+	if err := book.ValidateWithOrderMap(snap.GetOrderMap()); err != nil {
+		t.Fatalf("validate: %v (map=%d active=%d)", err, len(snap.GetOrderMap()), book.ActiveOrderCount())
+	}
+}
+
+func TestOrderBook_crossedMatching_orderMapConsistent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stress in -short")
+	}
+	book := engine.NewOrderBook("BTC-USDT")
+	price := decimal.NewFromInt(65000)
+	qty := decimal.RequireFromString("0.001")
+	for i := uint64(1); i <= 100_000; i++ {
+		side := engine.SideBuy
+		if i%10 < 7 { // 70% buy taker vs resting sells
+			side = engine.SideBuy
+		} else {
+			side = engine.SideSell
+		}
+		o := engine.Order{
+			OrderID: i, Symbol: "BTC-USDT", Side: side, Type: engine.OrderTypeLimit,
+			Price: price, Quantity: qty, Remaining: qty, UpdateTime: time.Now(),
+		}
+		if _, err := book.Match(o, i); err != nil {
+			t.Fatalf("match %d: %v", i, err)
+		}
+		if i%10_000 == 0 {
+			snap := book.ExportSnapshot("shard-0", i, time.Now())
+			if err := book.ValidateWithOrderMap(snap.GetOrderMap()); err != nil {
+				t.Fatalf("at %d: %v (map=%d active=%d)", i, err, len(snap.GetOrderMap()), book.ActiveOrderCount())
+			}
+		}
+	}
+}

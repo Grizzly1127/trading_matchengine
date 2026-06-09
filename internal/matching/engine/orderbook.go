@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"time"
+
 	"github.com/Grizzly1127/trading_matchengine/pkg/skiplist"
 	"github.com/shopspring/decimal"
 )
@@ -24,30 +26,42 @@ func NewOrderBook(symbol string) *OrderBook {
 	}
 }
 
-// compareAsk 卖盘升序：最低价在表头。
+// compareAsk 卖盘升序：最低价在表头；同价 FIFO（UpdateTime），同价同时间再按 order_id 区分。
 func compareAsk(a, b any) int {
 	ao := a.(Order)
 	bo := b.(Order)
-	if ao.OrderID == bo.OrderID {
-		return 0
-	}
 	if cmp := ao.Price.Cmp(bo.Price); cmp != 0 {
 		return cmp
 	}
-	return ao.UpdateTime.Compare(bo.UpdateTime)
+	if cmp := ao.UpdateTime.Compare(bo.UpdateTime); cmp != 0 {
+		return cmp
+	}
+	if ao.OrderID != bo.OrderID {
+		if ao.OrderID < bo.OrderID {
+			return -1
+		}
+		return 1
+	}
+	return 0
 }
 
-// compareBid 买盘降序：最高价在表头。
+// compareBid 买盘降序：最高价在表头；同价 FIFO（UpdateTime），同价同时间再按 order_id 区分。
 func compareBid(a, b any) int {
 	ao := a.(Order)
 	bo := b.(Order)
-	if ao.OrderID == bo.OrderID {
-		return 0
-	}
 	if cmp := bo.Price.Cmp(ao.Price); cmp != 0 {
 		return cmp
 	}
-	return ao.UpdateTime.Compare(bo.UpdateTime)
+	if cmp := ao.UpdateTime.Compare(bo.UpdateTime); cmp != 0 {
+		return cmp
+	}
+	if ao.OrderID != bo.OrderID {
+		if ao.OrderID < bo.OrderID {
+			return -1
+		}
+		return 1
+	}
+	return 0
 }
 
 func (b *OrderBook) getSiteBook(side Side) *skiplist.SkipList {
@@ -83,8 +97,14 @@ func (b *OrderBook) BestBid() (decimal.Decimal, bool) {
 }
 
 func (b *OrderBook) InsertOrder(o Order) {
-	if _, ok := b.orderMap[o.OrderID]; ok {
-		return
+	if o.UpdateTime.IsZero() {
+		o.UpdateTime = time.Now()
+	}
+	if existing, ok := b.orderMap[o.OrderID]; ok {
+		if b.getSiteBook(existing.Side).Contains(existing) {
+			return
+		}
+		delete(b.orderMap, o.OrderID)
 	}
 	b.orderMap[o.OrderID] = o
 	b.getSiteBook(o.Side).Insert(o)

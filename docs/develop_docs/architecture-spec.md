@@ -266,8 +266,10 @@ Matching Engine (消费 order.commands, 按 symbol partition)
   ├─ 执行撮合: TryMatch()
   │    ├─ 无成交 → 挂单到 Orderbook
   │    └─ 有成交 → 产出 TradeEvent[]
-  └─ 发布 Kafka: match.events → OrderAccepted/OrderFilled/OrderPartialFilled
-                 trade.events → TradeEvent{trade_id, symbol, price, qty, maker_id, taker_id}
+  ├─ 写入本地 Event Outbox（match/trade 事件 payload）并 fsync
+  ├─ Commit order.commands Kafka offset（仅 outbox durable 之后）
+  └─ Event Relay（异步）→ Kafka: match.events / trade.events
+         （设计详见 matching-event-outbox-design.md；实现前可仍为同步 Publish）
          │
          ▼
 Order Service (消费 match.events)
@@ -361,7 +363,9 @@ Index Price Service
 | L2  | Order Service → Kafka           | **至少一次投递**    | Transactional Outbox + 后台 Relay      |
 | L3  | Kafka → Matching Engine         | **有序 + 至少一次** | 按 symbol 固定 partition；消费幂等           |
 | L4  | Matching Engine 进程内             | **命令级原子**     | WAL fsync 后再改内存；单 SymbolEngine 串行    |
-| L5  | Matching Engine → Order Service | **最终一致**      | `match.events` / `trade.events` 幂等写库 |
+| L4b | Matching 进程内事件出站              | **至少落盘一次**    | 本地 Event Outbox fsync；详见 [matching-event-outbox-design.md](./matching-event-outbox-design.md) |
+| L4c | `order.commands` offset commit  | **不超过已落盘事件**  | Event Outbox durable 后才 commit；禁止先 commit 后写 outbox |
+| L5  | Matching Engine → Order Service | **最终一致**      | Event Outbox Relay + `match.events` / `trade.events` 幂等写库 |
 | L6  | 全链路对用户语义                        | **最终一致**      | 订单状态机 + 中间态超时 + 对账（§5.6）             |
 
 
@@ -572,8 +576,12 @@ Step 1: 加载 shard manifest 和各 symbol 最新快照
 Step 2: 回放 shard WAL（manifest 后的增量）
   └─ 读取 WAL 中 kafka_offset > shard_recovered_offset 的所有条目
   └─ 按 symbol 分发给对应 SymbolEngine 重新执行命令
-  └─ 不重新发布 Kafka 事件，仅恢复内存状态
+  └─ **不**从命令回放推导并发布 Kafka 事件，仅恢复内存状态
   └─ WAL 回放完成后记录 wal_recovered_offset
+
+Step 2b: Event Outbox Relay 追平（启用异步发布时）
+  └─ 从 `last_published_outbox_seq` 续投未发布记录至 match.events / trade.events
+  └─ 与 Step 2 命令回放分工：命令恢复 orderbook，Outbox 恢复事件投递
 
 Step 3: 从 Kafka 续消费
   └─ seek Kafka consumer offset 到 wal_recovered_offset + 1

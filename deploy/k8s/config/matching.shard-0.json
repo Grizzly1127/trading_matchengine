@@ -3,6 +3,7 @@
   "shard_id": "shard-0",
   "shards_file": "/app/config/shards.json",
   "snapshot_every": 10000,
+  "snapshot_interval_seconds": 300,
   "snapshot_on_exit": true,
   "default_symbol": "BTC-USDT",
   "symbols_file": "/app/config/symbols.json",

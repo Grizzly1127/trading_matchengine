@@ -13,6 +13,7 @@ import (
 // Config 是 gateway 进程启动配置。
 type Config struct {
 	HTTPListen        string                      `json:"http_listen"`
+	MetricsListen     string                      `json:"metrics_listen"`
 	OrderService      ServiceConfig               `json:"order_service"`
 	MarketDataService ServiceConfig               `json:"marketdata_service"`
 	KlineService      ServiceConfig               `json:"kline_service"`
@@ -80,6 +81,11 @@ func (c Config) NewVerifier(ctx context.Context) (*auth.Verifier, error) {
 func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	if c.HTTPListen == "" {
 		c.HTTPListen = ":8080"
+	}
+	if c.MetricsListen == "" {
+		if _, ok := raw["metrics_listen"]; !ok {
+			c.MetricsListen = ":9103"
+		}
 	}
 
 	c.applyServiceDefaults(c.OrderService, "localhost:50051", 10)

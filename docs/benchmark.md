@@ -1,7 +1,7 @@
 # Benchmark 与压测方案
 
 **版本**: 1.0  
-**关联**: [architecture-spec.md](./develop_docs/architecture-spec.md) Phase 4 · [development-checklist.md](./develop_docs/development-checklist.md) §4.3 · [l2-optimization-roadmap.md](./develop_docs/l2-optimization-roadmap.md)（L2 未达标时的优化路线图）· [l2-optimization-journey.md](./develop_docs/l2-optimization-journey.md)（**已做优化逐步复盘**）
+**关联**: [architecture-spec.md](./develop_docs/architecture-spec.md) Phase 4 · [development-checklist.md](./develop_docs/development-checklist.md) §4.3 · [l2-optimization-roadmap.md](./develop_docs/l2-optimization-roadmap.md)（L2 未达标时的优化路线图）· [matching-event-outbox-design.md](./develop_docs/matching-event-outbox-design.md)（Matching 异步事件发布设计）· [l3-optimization-roadmap.md](./develop_docs/l3-optimization-roadmap.md)（L3 Outbox 投递优化）· [l2-optimization-journey.md](./develop_docs/l2-optimization-journey.md)（**已做优化逐步复盘**）
 
 本文描述本仓库 **L0～L3** 性能测试分层、验收指标与可执行命令。开发环境使用本地 Docker Compose，无需云托管。
 
@@ -162,20 +162,70 @@ matching_kafka_lag
 
 ## 6. L3：全链路
 
-需安装 [vegeta](https://github.com/tsenart/vegeta)：
+需安装 [vegeta](https://github.com/tsenart/vegeta)（≥ v12.7 使用 JSON target 格式）：
 
 ```bash
 go install github.com/tsenart/vegeta@latest
-./scripts/bench/e1-orders.sh --deposit --rate 200 --duration 3m
+./scripts/bench/e1-orders.sh --rate 500 --duration 3m
+./scripts/bench/e1-orders.sh --rate 3000 --duration 5m --drain-timeout 600
 ```
 
-观察：
+默认每轮会 **停服 → `reset-dev.sh -y --migrate --kafka-topics` → `dev.sh start --build`**，再压测；连跑不清理请加 `--no-reset-env`。
 
-- Gateway 延迟 / 错误率（`vegeta report`）
-- `http://localhost:9101/metrics` — Matching
-- `http://localhost:9104/metrics` — `order_outbox_pending_count`
+targets 由 `bin/bench-targets`（Go）生成，120 万条约 **1s**；首次运行脚本会自动 `go build`。勿用旧版 bash 逐条 base64 循环（百万级需 1h+）。
 
-L3 与 L2 SLA **分开评估**：全链路受 PostgreSQL、Outbox 影响，不必与 5k cmd/s 直接对比。
+**充值**：默认按 `请求数 × price × quantity × 1.1` 为每个压测用户（默认 50 个，`user_id` 1..50 轮询）充值 USDT，避免买单冻结导致 `422` 余额不足。报告目录含 `meta.txt` 记录充值与负载参数。跳过充值：`--no-deposit`。
+
+### 6.1 验收 SLA（L3 专用，与 L2 分开）
+
+| 维度 | 指标 | PASS 条件 |
+|------|------|-----------|
+| **接单** | vegeta Success | **≥ 99.9%** |
+| **接单** | vegeta P99 延迟 | **≤ 50 ms** |
+| **投递** | 管道完成率 | Outbox 排空后 **`matching_processed / api_success ≥ 99%** |
+
+**不要**用 vegeta 延迟或成功率单独判断全链路是否跑完——API 100% 成功时 Outbox / Matching 仍可能积压。
+
+### 6.2 报告目录与 `pipeline_summary.txt`
+
+`e1-orders.sh` 在 vegeta 结束后会：
+
+1. 轮询 `order_outbox_pending_count`（`:9104/metrics`）直至 **0** 或超时（默认 **10 min**，`--drain-timeout`）
+2. 采集 Order / Matching 最终指标
+3. 写入 **`pipeline_summary.txt`**
+
+| 字段 | 含义 |
+|------|------|
+| `api_success_count` | vegeta 201 成功数 |
+| `matching_processed_count` | `matching_commands_processed_total` |
+| `pipeline_completion_rate` | `matching_processed / api_success`（小数，如 `0.9987`） |
+| `outbox_drain_seconds` | 排空等待耗时（`-1` 表示 metrics 不可用） |
+| `outbox_pending_final` | 排空结束时的 pending（目标 `0`） |
+| `accept_sla` / `delivery_sla` | 对照 §6.1 的 PASS/FAIL |
+
+示例：
+
+```text
+api_success_count=90000
+matching_processed_count=90000
+pipeline_completion_rate=1.0000
+outbox_drain_seconds=12
+outbox_pending_final=0
+api_success_ratio=100.00%
+api_latency_p99_ms=7.03
+accept_sla=PASS
+delivery_sla=PASS
+```
+
+报告目录还含：`report.txt`、`histogram.txt`、`order-metrics.txt`、`matching-metrics.txt`、`meta.txt`。
+
+### 6.3 观察指标
+
+- Gateway：`vegeta report`（`report.txt`）
+- Order Outbox：`http://localhost:9104/metrics` — `order_outbox_pending_count`、`order_outbox_relay_*`
+- Matching：`http://localhost:9101/metrics` — `matching_commands_processed_total`、`matching_kafka_lag`
+
+L3 与 L2 SLA **分开评估**：全链路受 PostgreSQL、Outbox、Gateway 影响，不必与单进程 5k cmd/s 直接对比。Outbox 瓶颈与优化见 [l3-optimization-roadmap.md](./develop_docs/l3-optimization-roadmap.md)。
 
 ---
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/gateway/handler"
+	gwmetrics "github.com/Grizzly1127/trading_matchengine/internal/gateway/metrics"
 	gwmw "github.com/Grizzly1127/trading_matchengine/internal/gateway/middleware"
 	"github.com/Grizzly1127/trading_matchengine/pkg/auth"
 	indexv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/index/v1"
@@ -21,6 +22,7 @@ type Deps struct {
 	Log        zerolog.Logger
 	Config     config.Config
 	Verifier   *auth.Verifier
+	Metrics    *gwmetrics.Metrics
 	Order      orderv1.OrderServiceClient
 	Balance    orderv1.BalanceServiceClient
 	MarketData marketdatav1.MarketDataServiceClient
@@ -42,7 +44,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	authenticate := gwmw.Authenticate(deps.Verifier)
 
-	orderH := &handler.Orders{Orders: deps.Order, Log: deps.Log}
+	orderH := &handler.Orders{Orders: deps.Order, Log: deps.Log, Metrics: deps.Metrics}
 	r.Group(func(r chi.Router) {
 		r.Use(authenticate, gwmw.RequireScopes(auth.ScopeOrdersWrite))
 		r.Post("/v1/orders", orderH.PlaceOrder)

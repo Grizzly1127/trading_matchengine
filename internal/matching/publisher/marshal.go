@@ -40,6 +40,16 @@ func marshalMatchBatch(events []*matchingv1.MatchEvent) ([][]byte, error) {
 	return vals, nil
 }
 
+// MarshalMatchEvent 序列化单条 MatchEvent（供 Event Outbox 写入）。
+func MarshalMatchEvent(ev *matchingv1.MatchEvent) ([]byte, error) {
+	return marshalProto(ev)
+}
+
+// MarshalTradeEvent 序列化单条 TradeEvent（供 Event Outbox 写入）。
+func MarshalTradeEvent(ev *matchingv1.TradeEvent) ([]byte, error) {
+	return marshalProto(ev)
+}
+
 func marshalTradeBatch(events []*matchingv1.TradeEvent) ([][]byte, error) {
 	if len(events) == 0 {
 		return nil, nil

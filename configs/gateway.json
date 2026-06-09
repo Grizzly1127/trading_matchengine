@@ -1,5 +1,6 @@
 {
   "http_listen": ":8080",
+  "metrics_listen": ":9103",
   "order_service": {
     "grpc_addr": "localhost:50051",
     "dial_seconds": 10

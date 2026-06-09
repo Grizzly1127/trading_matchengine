@@ -131,7 +131,7 @@ func initSharedPostgres(t *testing.T) {
 	sharedOnce.Do(func() {
 		ctx := context.Background()
 		if url := os.Getenv("TEST_DATABASE_URL"); url != "" {
-			pool, err := repository.NewPool(ctx, url)
+			pool, err := repository.NewPool(ctx, url, 0)
 			if err != nil {
 				sharedSkip = "TEST_DATABASE_URL connect failed: " + err.Error()
 				return
@@ -170,7 +170,7 @@ func initSharedPostgres(t *testing.T) {
 			sharedSkip = "connection string: " + err.Error()
 			return
 		}
-		pool, err := repository.NewPool(ctx, connStr)
+		pool, err := repository.NewPool(ctx, connStr, 0)
 		if err != nil {
 			_ = pg.Terminate(ctx)
 			sharedSkip = "pool: " + err.Error()

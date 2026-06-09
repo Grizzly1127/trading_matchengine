@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
@@ -251,5 +252,90 @@ func TestEngine_walAndSnapshotFilesCreated(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(snapPath, "snapshot_*.pb"))
 	if len(matches) == 0 {
 		t.Fatal("expected snapshot file")
+	}
+}
+
+func TestEngine_groupCommit_snapshotAfterMatches(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stress in -short")
+	}
+	dir := t.TempDir()
+	cfg := testConfig(t, dir)
+	cfg.SnapshotEvery = 100_000
+	cfg.WALGroupCommit = recovery.WALGroupCommitConfig{SyncEveryRecords: 32}
+
+	eng, err := recovery.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	for i := uint64(1); i <= 551; i++ {
+		if _, err := eng.ApplyNewOrder(limitSell(i, "65000", "0.001")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := uint64(552); i <= 5_000; i++ {
+		if _, err := eng.ApplyNewOrder(limitBuy(i, "65000", "0.001")); err != nil {
+			t.Fatalf("buy %d: %v", i, err)
+		}
+	}
+
+	book := eng.Shard().Symbol("BTC-USDT").OrderBook
+	snap := book.ExportSnapshot(cfg.ShardID, eng.LastSeq(), time.Now())
+	if err := book.ValidateWithOrderMap(snap.GetOrderMap()); err != nil {
+		t.Fatalf("validate: %v map=%d active=%d", err, len(snap.GetOrderMap()), book.ActiveOrderCount())
+	}
+	if err := eng.SnapshotNow(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEngine_snapshotIfStale_skipsWithoutProgress(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(t, dir)
+	cfg.SnapshotEvery = 1_000_000 // 仅测定时路径，避免计数触发
+
+	e, err := recovery.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+
+	if _, err := e.ApplyNewOrder(limitSell(1, "100", "1")); err != nil {
+		t.Fatal(err)
+	}
+	seqAfterOrder := e.LastSeq()
+	if seqAfterOrder == 0 {
+		t.Fatal("expected wal seq > 0")
+	}
+
+	if err := e.SnapshotIfStale(); err != nil {
+		t.Fatal(err)
+	}
+	snapDir := filepath.Join(dir, "snapshots", cfg.ShardID, "BTC-USDT")
+	matches, _ := filepath.Glob(filepath.Join(snapDir, "snapshot_*.pb"))
+	if len(matches) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(matches))
+	}
+
+	if err := e.SnapshotIfStale(); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ = filepath.Glob(filepath.Join(snapDir, "snapshot_*.pb"))
+	if len(matches) != 1 {
+		t.Fatalf("stale snapshot should no-op, got %d files", len(matches))
+	}
+
+	if _, err := e.ApplyNewOrder(limitSell(2, "99", "1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SnapshotIfStale(); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ = filepath.Glob(filepath.Join(snapDir, "snapshot_*.pb"))
+	if len(matches) != 2 {
+		t.Fatalf("snapshots after progress = %d, want 2", len(matches))
 	}
 }

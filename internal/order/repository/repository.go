@@ -41,8 +41,9 @@ type Order struct {
 
 // Repository 封装 PostgreSQL 订单读写。
 type Repository struct {
-	pool   *pgxpool.Pool
-	assets *symbolrules.AssetRegistry
+	pool      *pgxpool.Pool
+	relayPool *pgxpool.Pool
+	assets    *symbolrules.AssetRegistry
 }
 
 // New 创建 Repository。
@@ -69,11 +70,14 @@ func (r *Repository) roundUp(asset string, amount decimal.Decimal) decimal.Decim
 	return r.assets.RoundUp(asset, amount)
 }
 
-// NewPool 创建连接池。
-func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+// NewPool 创建连接池；maxConns≤0 时使用 pgx 默认上限。
+func NewPool(ctx context.Context, databaseURL string, maxConns int) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	if maxConns > 0 {
+		cfg.MaxConns = int32(maxConns)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -166,6 +170,9 @@ RETURNING id, user_id, client_order_id, symbol, side, order_type,
 INSERT INTO client_order_idempotency (user_id, client_order_id, order_id)
 VALUES ($1, $2, $3)`
 	if _, err := tx.Exec(ctx, insertIdem, in.UserID, in.ClientOrderID, order.ID); err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicateClientOrder
+		}
 		return nil, fmt.Errorf("insert idempotency: %w", err)
 	}
 
@@ -188,20 +195,9 @@ VALUES ($1, $2, $3)`
 }
 
 func insertNewOrderOutbox(ctx context.Context, tx pgx.Tx, order *Order, topic string) error {
-	const insertOutbox = `
-INSERT INTO order_outbox (aggregate_id, event_type, payload, topic, partition_key)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id`
-
-	var outboxID uint64
-	if err := tx.QueryRow(ctx, insertOutbox,
-		order.ID,
-		outbox.EventTypeNewOrder,
-		[]byte{},
-		topic,
-		order.Symbol,
-	).Scan(&outboxID); err != nil {
-		return fmt.Errorf("insert outbox: %w", err)
+	outboxID, err := allocateOutboxID(ctx, tx)
+	if err != nil {
+		return err
 	}
 
 	payload, err := outbox.BuildNewOrderPayload(orderSnapshot(order), outboxID)
@@ -209,11 +205,7 @@ RETURNING id`
 		return fmt.Errorf("build outbox payload: %w", err)
 	}
 
-	const updatePayload = `UPDATE order_outbox SET payload = $1 WHERE id = $2`
-	if _, err := tx.Exec(ctx, updatePayload, payload, outboxID); err != nil {
-		return fmt.Errorf("update outbox payload: %w", err)
-	}
-	return nil
+	return insertOutboxRow(ctx, tx, outboxID, order.ID, outbox.EventTypeNewOrder, payload, topic, order.Symbol)
 }
 
 func orderSnapshot(o *Order) outbox.OrderSnapshot {
@@ -272,8 +264,12 @@ LIMIT $1`
 
 // MarkPublished 标记 Outbox 已投递。
 func (r *Repository) MarkPublished(ctx context.Context, id uint64) error {
+	return r.markPublished(ctx, r.pool, id)
+}
+
+func (r *Repository) markPublished(ctx context.Context, pool *pgxpool.Pool, id uint64) error {
 	const q = `UPDATE order_outbox SET published_at = now() WHERE id = $1 AND published_at IS NULL`
-	tag, err := r.pool.Exec(ctx, q, id)
+	tag, err := pool.Exec(ctx, q, id)
 	if err != nil {
 		return fmt.Errorf("mark outbox published: %w", err)
 	}
@@ -283,10 +279,30 @@ func (r *Repository) MarkPublished(ctx context.Context, id uint64) error {
 	return nil
 }
 
+// MarkPublishedBatch 批量标记 Outbox 已投递。
+func (r *Repository) MarkPublishedBatch(ctx context.Context, ids []uint64) error {
+	return r.markPublishedBatch(ctx, r.pool, ids)
+}
+
+func (r *Repository) markPublishedBatch(ctx context.Context, pool *pgxpool.Pool, ids []uint64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	const q = `UPDATE order_outbox SET published_at = now() WHERE id = ANY($1) AND published_at IS NULL`
+	if _, err := pool.Exec(ctx, q, ids); err != nil {
+		return fmt.Errorf("mark outbox published batch: %w", err)
+	}
+	return nil
+}
+
 // IncrementRetry 投递失败时递增重试计数。
 func (r *Repository) IncrementRetry(ctx context.Context, id uint64) error {
+	return r.incrementRetry(ctx, r.pool, id)
+}
+
+func (r *Repository) incrementRetry(ctx context.Context, pool *pgxpool.Pool, id uint64) error {
 	const q = `UPDATE order_outbox SET retry_count = retry_count + 1 WHERE id = $1`
-	if _, err := r.pool.Exec(ctx, q, id); err != nil {
+	if _, err := pool.Exec(ctx, q, id); err != nil {
 		return fmt.Errorf("increment outbox retry: %w", err)
 	}
 	return nil
@@ -294,15 +310,46 @@ func (r *Repository) IncrementRetry(ctx context.Context, id uint64) error {
 
 // GetOrderStatus 查询订单当前状态（Relay 投递前校验）。
 func (r *Repository) GetOrderStatus(ctx context.Context, orderID uint64) (string, error) {
-	const q = `SELECT status FROM orders WHERE id = $1`
-	var status string
-	if err := r.pool.QueryRow(ctx, q, orderID).Scan(&status); err != nil {
-		if err == pgx.ErrNoRows {
-			return "", fmt.Errorf("order %d not found", orderID)
-		}
-		return "", fmt.Errorf("get order status: %w", err)
+	statuses, err := r.GetOrderStatusesBatch(ctx, []uint64{orderID})
+	if err != nil {
+		return "", err
+	}
+	status, ok := statuses[orderID]
+	if !ok {
+		return "", fmt.Errorf("order %d not found", orderID)
 	}
 	return status, nil
+}
+
+// GetOrderStatusesBatch 批量查询订单状态（Relay 投递前校验）。
+func (r *Repository) GetOrderStatusesBatch(ctx context.Context, orderIDs []uint64) (map[uint64]string, error) {
+	return r.getOrderStatusesBatch(ctx, r.pool, orderIDs)
+}
+
+func (r *Repository) getOrderStatusesBatch(ctx context.Context, pool *pgxpool.Pool, orderIDs []uint64) (map[uint64]string, error) {
+	if len(orderIDs) == 0 {
+		return map[uint64]string{}, nil
+	}
+	const q = `SELECT id, status FROM orders WHERE id = ANY($1)`
+	rows, err := pool.Query(ctx, q, orderIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get order statuses batch: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[uint64]string, len(orderIDs))
+	for rows.Next() {
+		var id uint64
+		var status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, fmt.Errorf("scan order status: %w", err)
+		}
+		out[id] = status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get order statuses batch: %w", err)
+	}
+	return out, nil
 }
 
 // InsertPendingInput 新订单写入参数。

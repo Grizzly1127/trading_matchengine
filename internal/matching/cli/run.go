@@ -77,10 +77,14 @@ func WriteResponse(w io.Writer, resp Response) error {
 	return err
 }
 
-// Shutdown 可选写 snapshot 并关闭引擎。
+// Shutdown 可选写 snapshot 并关闭引擎；退出快照失败不阻断 Close。
 func Shutdown(eng *recovery.Engine, snapshotOnExit bool) error {
 	if snapshotOnExit {
 		if err := eng.SnapshotNow(); err != nil {
+			// 返回 close 前先记录快照错误，由调用方打日志；进程仍应优雅退出。
+			if closeErr := eng.Close(); closeErr != nil {
+				return fmt.Errorf("close engine: %w (snapshot on exit: %v)", closeErr, err)
+			}
 			return fmt.Errorf("snapshot on exit: %w", err)
 		}
 	}

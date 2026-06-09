@@ -2,13 +2,24 @@
   "data_dir": "data",
   "shard_id": "shard-0",
   "shards_file": "configs/shards.json",
-  "snapshot_every": 100000,
+  "snapshot_every": 1000000,
+  "snapshot_interval_seconds": 300,
   "snapshot_on_exit": true,
   "wal_group_commit": {
-    "sync_every_records": 32,
-    "sync_interval_ms": 2,
-    "consumer_batch_max": 32,
-    "consumer_batch_wait_ms": 2
+    "sync_every_records": 64,
+    "sync_interval_ms": 5,
+    "consumer_batch_max": 64,
+    "consumer_batch_wait_ms": 3
+  },
+  "event_outbox": {
+    "enabled": true,
+    "sync_every_records": 64,
+    "sync_interval_ms": 5
+  },
+  "event_relay": {
+    "poll_interval_ms": 2,
+    "batch_size": 256,
+    "workers": 1
   },
   "default_symbol": "BTC-USDT",
   "symbols_file": "configs/symbols.json",
@@ -29,8 +40,8 @@
     "trade_topic": "trade.events",
     "partition": 0,
     "required_acks": "one",
-    "batch_size": 256,
-    "batch_timeout_ms": 5,
+    "batch_size": 512,
+    "batch_timeout_ms": 10,
     "compression": "lz4"
   },
   "log": {

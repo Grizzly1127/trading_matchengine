@@ -28,7 +28,25 @@ func main() {
 	label := flag.String("label", "", "报告标签（如 before/after）")
 	deltaPre := flag.String("delta-pre", "", "窗口起点 Prometheus 文本文件（与 -delta-post 合用）")
 	deltaPost := flag.String("delta-post", "", "窗口终点 Prometheus 文本文件")
+	l3Breakdown := flag.Bool("l3-breakdown", false, "输出 L3 延迟分解（需 -vegeta-report 与 order/gateway metrics 快照）")
+	vegetaReport := flag.String("vegeta-report", "", "vegeta report.txt 路径")
+	orderPre := flag.String("order-pre", "", "压测前 order metrics 快照")
+	orderPost := flag.String("order-post", "", "压测后 order metrics 快照")
+	gatewayPre := flag.String("gateway-pre", "", "压测前 gateway metrics 快照")
+	gatewayPost := flag.String("gateway-post", "", "压测后 gateway metrics 快照")
 	flag.Parse()
+
+	if *l3Breakdown {
+		if *vegetaReport == "" {
+			fmt.Fprintln(os.Stderr, "l3-breakdown 需要 -vegeta-report")
+			os.Exit(1)
+		}
+		if err := printL3Breakdown(os.Stdout, *vegetaReport, *orderPre, *orderPost, *gatewayPre, *gatewayPost); err != nil {
+			fmt.Fprintf(os.Stderr, "l3-breakdown: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *deltaPre != "" || *deltaPost != "" {
 		if *deltaPre == "" || *deltaPost == "" {

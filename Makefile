@@ -130,6 +130,7 @@ build-bench:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/bench-producer ./cmd/bench-producer
 	go build -o $(BIN_DIR)/bench-report ./cmd/bench-report
+	go build -o $(BIN_DIR)/bench-targets ./cmd/bench-targets
 
 bench: build-bench bench-l0
 

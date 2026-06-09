@@ -31,7 +31,7 @@ done
 
 report() {
   local label="${1:-}"
-  go run "$ROOT/cmd/bench-report/main.go" -url "$METRICS_URL" ${label:+-label "$label"}
+  go run "$ROOT/cmd/bench-report" -url "$METRICS_URL" ${label:+-label "$label"}
 }
 
 if [[ "$DELTA_SEC" -le 0 ]]; then
