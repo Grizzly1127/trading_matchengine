@@ -35,6 +35,10 @@ func (f *fakeStore) FindByClientOrderID(_ context.Context, userID uint64, client
 }
 
 func (f *fakeStore) InsertPending(_ context.Context, in repository.InsertPendingInput) (*repository.Order, error) {
+	key := idemKey(in.UserID, in.ClientOrderID)
+	if _, ok := f.byClient[key]; ok {
+		return nil, repository.ErrDuplicateClientOrder
+	}
 	f.lastIn = in
 	f.nextID++
 	o := &repository.Order{
@@ -48,7 +52,7 @@ func (f *fakeStore) InsertPending(_ context.Context, in repository.InsertPending
 		Quantity:      in.Quantity,
 		Status:        "PENDING",
 	}
-	f.byClient[idemKey(in.UserID, in.ClientOrderID)] = o
+	f.byClient[key] = o
 	f.byID[o.ID] = o
 	return o, nil
 }
@@ -317,6 +321,47 @@ func TestPlaceOrder_MarketDataUnavailable_ReturnsUnavailable(t *testing.T) {
 	_, err := svc.PlaceOrder(context.Background(), req)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
+	}
+}
+
+func TestPlaceOrder_DuplicateInsertReturnsIdempotent(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb, err := pkgredis.NewClient(pkgredis.Config{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rdb.Close()
+
+	store := &fakeStore{byClient: make(map[string]*repository.Order), byID: make(map[uint64]*repository.Order)}
+	svc := &OrderService{
+		Repo:        store,
+		OutboxTopic: "order.commands",
+		Idempotency: idempotency.NewRedisCache(rdb, time.Hour),
+	}
+	req := &orderv1.PlaceOrderRequest{
+		UserId:        2,
+		ClientOrderId: "dup-insert",
+		Symbol:        "BTC-USDT",
+		Side:          commonv1.Side_SIDE_BUY,
+		Type:          commonv1.OrderType_ORDER_TYPE_LIMIT,
+		Price:         &commonv1.Decimal{Value: "100"},
+		Quantity:      &commonv1.Decimal{Value: "1"},
+	}
+	resp1, err := svc.PlaceOrder(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first PlaceOrder: %v", err)
+	}
+	mr.Del("idempotent:order:2:dup-insert")
+
+	resp2, err := svc.PlaceOrder(context.Background(), req)
+	if err != nil {
+		t.Fatalf("second PlaceOrder: %v", err)
+	}
+	if !resp2.GetIdempotentHit() {
+		t.Fatal("expected idempotent hit on duplicate insert")
+	}
+	if resp2.GetOrderId() != resp1.GetOrderId() {
+		t.Fatalf("order_id=%d want %d", resp2.GetOrderId(), resp1.GetOrderId())
 	}
 }
 

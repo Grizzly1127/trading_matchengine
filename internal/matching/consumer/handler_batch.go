@@ -50,21 +50,32 @@ func (h *Handler) ProcessBatch(ctx context.Context, msgs []kafka.Message) error 
 	n := time.Duration(len(msgs))
 	perCmdPrep := prepDur / n
 
-	outs, err := h.buildOutboundBatch(staged, outcomes)
-	if err != nil {
-		return err
-	}
-
 	pubStart := time.Now()
-	if len(outs) > 0 {
-		if err := h.Publisher.PublishBatch(ctx, outs); err != nil {
+	var perCmdPub time.Duration
+	if h.EventOutbox != nil {
+		syncDur, err := h.persistOutboundBatch(staged, outcomes)
+		if err != nil {
 			if h.Metrics != nil {
 				h.Metrics.ObservePublishError()
 			}
 			return err
 		}
+		perCmdPub = syncDur / n
+	} else {
+		outs, err := h.buildOutboundBatch(staged, outcomes)
+		if err != nil {
+			return err
+		}
+		if len(outs) > 0 {
+			if err := h.Publisher.PublishBatch(ctx, outs); err != nil {
+				if h.Metrics != nil {
+					h.Metrics.ObservePublishError()
+				}
+				return err
+			}
+		}
+		perCmdPub = time.Since(pubStart) / n
 	}
-	perCmdPub := time.Since(pubStart) / n
 
 	for _, msg := range msgs {
 		if h.Metrics != nil {

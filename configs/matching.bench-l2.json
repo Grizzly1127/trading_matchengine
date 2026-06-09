@@ -18,6 +18,16 @@
   "order_service": {
     "enabled": false
   },
+  "event_outbox": {
+    "enabled": true,
+    "sync_every_records": 64,
+    "sync_interval_ms": 5
+  },
+  "event_relay": {
+    "poll_interval_ms": 2,
+    "batch_size": 256,
+    "workers": 1
+  },
   "kafka": {
     "enabled": true,
     "brokers": ["localhost:9092"],

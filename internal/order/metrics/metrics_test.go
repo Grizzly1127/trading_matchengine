@@ -9,4 +9,8 @@ func TestMetricsSet(t *testing.T) {
 	m.ObserveRelayBatchSize(100)
 	m.ObserveRelayDispatchLatencyMs(25)
 	m.AddRelayPublished(10)
+	m.ObserveGRPCPlaceOrder(3)
+	m.ObservePlaceValidate(1)
+	m.ObservePlaceIdempotency(1)
+	m.ObservePlaceDBTx(2)
 }

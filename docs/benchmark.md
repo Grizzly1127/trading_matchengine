@@ -1,7 +1,7 @@
 # Benchmark 与压测方案
 
 **版本**: 1.0  
-**关联**: [architecture-spec.md](./develop_docs/architecture-spec.md) Phase 4 · [development-checklist.md](./develop_docs/development-checklist.md) §4.3 · [l2-optimization-roadmap.md](./develop_docs/l2-optimization-roadmap.md)（L2 未达标时的优化路线图）· [l3-optimization-roadmap.md](./develop_docs/l3-optimization-roadmap.md)（L3 Outbox 投递优化）· [l2-optimization-journey.md](./develop_docs/l2-optimization-journey.md)（**已做优化逐步复盘**）
+**关联**: [architecture-spec.md](./develop_docs/architecture-spec.md) Phase 4 · [development-checklist.md](./develop_docs/development-checklist.md) §4.3 · [l2-optimization-roadmap.md](./develop_docs/l2-optimization-roadmap.md)（L2 未达标时的优化路线图）· [matching-event-outbox-design.md](./develop_docs/matching-event-outbox-design.md)（Matching 异步事件发布设计）· [l3-optimization-roadmap.md](./develop_docs/l3-optimization-roadmap.md)（L3 Outbox 投递优化）· [l2-optimization-journey.md](./develop_docs/l2-optimization-journey.md)（**已做优化逐步复盘**）
 
 本文描述本仓库 **L0～L3** 性能测试分层、验收指标与可执行命令。开发环境使用本地 Docker Compose，无需云托管。
 

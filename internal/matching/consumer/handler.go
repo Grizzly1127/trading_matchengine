@@ -7,20 +7,23 @@ import (
 	"time"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/engine"
+	matcheventoutbox "github.com/Grizzly1127/trading_matchengine/internal/matching/eventoutbox"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
+	"github.com/Grizzly1127/trading_matchengine/pkg/eventoutbox"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	matchingv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/matching/v1"
 	"google.golang.org/protobuf/proto"
 )
 
-// Handler 处理 order.commands 消息：WAL 持久化后发布事件。
+// Handler 处理 order.commands 消息：WAL 持久化后发布事件或写入 Event Outbox。
 type Handler struct {
-	Engine    *recovery.Engine
-	Publisher publisher.Publisher
-	Partition uint32
-	Metrics   *metrics.Metrics
+	Engine      *recovery.Engine
+	Publisher   publisher.Publisher
+	EventOutbox *eventoutbox.FileWriter
+	Partition   uint32
+	Metrics     *metrics.Metrics
 }
 
 // Process 解码、撮合、发布；调用方在成功后 Commit offset。
@@ -73,6 +76,22 @@ func (h *Handler) processNewOrder(ctx context.Context, cmd *matchingv1.NewOrderC
 		h.Metrics.ObserveTrades(len(trades))
 	}
 	out := publisher.BuildNewOrderEvents(h.Engine.Shard(), cmd, trades, walSeq, duplicate)
+	if h.EventOutbox != nil {
+		if len(out.MatchEvents) == 0 && len(out.TradeEvents) == 0 {
+			return nil
+		}
+		meta := matcheventoutbox.CommandMeta{KafkaPartition: uint32(msg.Partition), KafkaOffset: uint64(msg.Offset)}
+		if err := matcheventoutbox.AppendOutbound(h.EventOutbox, meta, out); err != nil {
+			return err
+		}
+		if err := h.EventOutbox.Sync(); err != nil {
+			return err
+		}
+		if h.Metrics != nil {
+			h.updateEventOutboxPendingMetric()
+		}
+		return nil
+	}
 	if err := h.Publisher.Publish(ctx, out); err != nil {
 		if h.Metrics != nil {
 			h.Metrics.ObservePublishError()
@@ -90,6 +109,22 @@ func (h *Handler) processCancel(ctx context.Context, cmd *matchingv1.CancelOrder
 		return err
 	}
 	out := publisher.BuildCancelEvents(cmd, h.Engine.LastSeq())
+	if h.EventOutbox != nil {
+		if len(out.MatchEvents) == 0 && len(out.TradeEvents) == 0 {
+			return nil
+		}
+		meta := matcheventoutbox.CommandMeta{KafkaPartition: uint32(msg.Partition), KafkaOffset: uint64(msg.Offset)}
+		if err := matcheventoutbox.AppendOutbound(h.EventOutbox, meta, out); err != nil {
+			return err
+		}
+		if err := h.EventOutbox.Sync(); err != nil {
+			return err
+		}
+		if h.Metrics != nil {
+			h.updateEventOutboxPendingMetric()
+		}
+		return nil
+	}
 	if err := h.Publisher.Publish(ctx, out); err != nil {
 		if h.Metrics != nil {
 			h.Metrics.ObservePublishError()

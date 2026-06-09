@@ -132,6 +132,8 @@ func main() {
 
 	var orderRedis *redis.Client
 
+	m := metrics.New()
+
 	orderSvc := &service.OrderService{
 		Repo:           repo,
 		OutboxTopic:    cfg.Kafka.CommandTopic,
@@ -139,8 +141,9 @@ func main() {
 		SlippageBuffer: decimal.NewFromFloat(cfg.MarketData.SlippageBuffer),
 		Symbols:        rulesCfg.Registry,
 		Shards:         shardMgr,
+		Metrics:        m,
 	}
-	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: orderSvc})
+	orderv1.RegisterOrderServiceServer(grpcServer, &handler.OrderServer{Svc: orderSvc, Metrics: m})
 	orderv1.RegisterOrderAdminServiceServer(grpcServer, &handler.AdminServer{Repo: repo})
 	balanceSvc := &service.BalanceService{Repo: repo}
 	orderv1.RegisterBalanceServiceServer(grpcServer, &handler.BalanceServer{Svc: balanceSvc})
@@ -153,7 +156,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	m := metrics.New()
 	if cfg.MetricsListen != "" {
 		go startOrderMetricsHTTP(ctx, log, cfg.MetricsListen)
 		go startOrderMetricsCollector(ctx, log, repo, m)

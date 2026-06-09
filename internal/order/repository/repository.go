@@ -170,6 +170,9 @@ RETURNING id, user_id, client_order_id, symbol, side, order_type,
 INSERT INTO client_order_idempotency (user_id, client_order_id, order_id)
 VALUES ($1, $2, $3)`
 	if _, err := tx.Exec(ctx, insertIdem, in.UserID, in.ClientOrderID, order.ID); err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicateClientOrder
+		}
 		return nil, fmt.Errorf("insert idempotency: %w", err)
 	}
 

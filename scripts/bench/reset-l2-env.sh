@@ -106,8 +106,8 @@ reset_kafka_topics() {
 }
 
 clean_matching_wal() {
-  log "删除 WAL / 快照: data/wal data/snapshots"
-  rm -rf "$ROOT/data/wal" "$ROOT/data/snapshots"
+  log "删除 WAL / 快照 / Event Outbox: data/wal data/snapshots data/event_outbox"
+  rm -rf "$ROOT/data/wal" "$ROOT/data/snapshots" "$ROOT/data/event_outbox"
   mkdir -p "$ROOT/data"
 }
 

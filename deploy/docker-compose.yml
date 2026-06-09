@@ -7,6 +7,8 @@
 services:
   postgres:
     image: postgres:16-alpine
+    # shared_buffers 依赖 shm；Docker 默认 64MB 过小
+    shm_size: 512mb
     environment:
       POSTGRES_USER: trading
       POSTGRES_PASSWORD: trading
@@ -15,6 +17,29 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # L3 压测调优：减少 checkpoint 频率、摊平刷盘，缓解 db_tx P99 尖刺（仍保持 synchronous_commit=on）
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
+      - -c
+      - log_checkpoints=on
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
 
   redis:
     image: redis:7.2-alpine

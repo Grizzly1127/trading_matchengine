@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/Grizzly1127/trading_matchengine/internal/order/idempotency"
+	ordermetrics "github.com/Grizzly1127/trading_matchengine/internal/order/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/repository"
 	"github.com/Grizzly1127/trading_matchengine/pkg/shardmgr"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
@@ -56,6 +58,7 @@ type OrderService struct {
 	SlippageBuffer decimal.Decimal
 	Symbols        *symbolrules.Registry
 	Shards         ShardRouter
+	Metrics        *ordermetrics.Metrics
 }
 
 func (s *OrderService) symbolRules(symbolName string) (symbolrules.Spec, error) {
@@ -78,20 +81,47 @@ func (s *OrderService) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRe
 		return nil, fmt.Errorf("%w: request is nil", ErrInvalidArgument)
 	}
 
+	validateStart := time.Now()
 	in, err := s.validatePlaceOrder(ctx, req)
+	if s.Metrics != nil {
+		s.Metrics.ObservePlaceValidate(time.Since(validateStart))
+	}
 	if err != nil {
 		return nil, err
 	}
 	in.OutboxTopic = s.OutboxTopic
 
-	if existing, ok, err := s.lookupIdempotentOrder(ctx, in.UserID, in.ClientOrderID); err != nil {
+	idemStart := time.Now()
+	existing, ok, err := s.lookupIdempotentOrder(ctx, in.UserID, in.ClientOrderID)
+	if s.Metrics != nil {
+		s.Metrics.ObservePlaceIdempotency(time.Since(idemStart))
+	}
+	if err != nil {
 		return nil, err
-	} else if ok {
+	}
+	if ok {
 		return toPlaceOrderResponse(existing, true), nil
 	}
 
+	dbStart := time.Now()
 	order, err := s.Repo.InsertPending(ctx, in)
+	if s.Metrics != nil {
+		s.Metrics.ObservePlaceDBTx(time.Since(dbStart))
+	}
 	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateClientOrder) {
+			existing, findErr := s.Repo.FindByClientOrderID(ctx, in.UserID, in.ClientOrderID)
+			if findErr != nil {
+				return nil, findErr
+			}
+			if existing == nil {
+				return nil, fmt.Errorf("duplicate client_order_id but order not found")
+			}
+			if s.Idempotency != nil {
+				_ = s.Idempotency.Remember(ctx, in.UserID, in.ClientOrderID, existing.ID)
+			}
+			return toPlaceOrderResponse(existing, true), nil
+		}
 		if errors.Is(err, repository.ErrInsufficientBalance) {
 			return nil, fmt.Errorf("%w: %v", ErrFailedPrecondition, err)
 		}
@@ -104,7 +134,7 @@ func (s *OrderService) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRe
 	return toPlaceOrderResponse(order, false), nil
 }
 
-// lookupIdempotentOrder 先查 Redis 缓存，未命中再查 PG；命中时回填缓存。
+// lookupIdempotentOrder 先查 Redis；未命中时若启用 Redis 则乐观插入（不预查 PG），否则查 PG 幂等表。
 func (s *OrderService) lookupIdempotentOrder(ctx context.Context, userID uint64, clientOrderID string) (*repository.Order, bool, error) {
 	if s.Idempotency != nil {
 		orderID, hit, err := s.Idempotency.Lookup(ctx, userID, clientOrderID)
@@ -114,6 +144,8 @@ func (s *OrderService) lookupIdempotentOrder(ctx context.Context, userID uint64,
 				return o, true, nil
 			}
 		}
+		// Redis miss：新单热路径省略 FindByClientOrderID，冲突由 InsertPending 唯一约束处理。
+		return nil, false, nil
 	}
 
 	existing, err := s.Repo.FindByClientOrderID(ctx, userID, clientOrderID)

@@ -30,7 +30,11 @@ RESET_ENV=true
 START_WAIT_SEC="${START_WAIT_SEC:-120}"
 OUTBOX_DRAIN_TIMEOUT="${OUTBOX_DRAIN_TIMEOUT:-600}"
 OUTBOX_DRAIN_INTERVAL="${OUTBOX_DRAIN_INTERVAL:-2}"
+MATCHING_DRAIN_TIMEOUT="${MATCHING_DRAIN_TIMEOUT:-600}"
+MATCHING_DRAIN_INTERVAL="${MATCHING_DRAIN_INTERVAL:-2}"
+MATCHING_LAG_MAX="${MATCHING_LAG_MAX:-0}"
 ORDER_METRICS_URL="${ORDER_METRICS_URL:-http://localhost:9104/metrics}"
+GATEWAY_METRICS_URL="${GATEWAY_METRICS_URL:-http://localhost:9103/metrics}"
 METRICS_URL="${METRICS_URL:-http://localhost:9101/metrics}"
 RUN_ID="${RUN_ID:-$(date +%s)}"
 
@@ -48,7 +52,9 @@ usage() {
   --side BUY|SELL   方向（默认 BUY；SELL 充值 BTC）
   --no-deposit      跳过自动充值（仅调试）
   --no-reset-env    跳过停服/reset-dev/重启
-  --drain-timeout S Outbox 排空等待超时（默认 600s）
+  --drain-timeout S       Order Outbox 排空超时（默认 600s）
+  --matching-drain-timeout S  Matching 追平超时（默认 600s）
+  --matching-lag-max N    投递 SLA 允许的最大 matching_kafka_lag（默认 0）
   --base-url URL    Gateway（默认 http://localhost:8080）
 
 默认会按「请求数 × 冻结额 × ${DEPOSIT_HEADROOM}」为每个压测用户充值，避免 422 余额不足。
@@ -70,6 +76,8 @@ while [[ $# -gt 0 ]]; do
     --no-deposit) DO_DEPOSIT=false; shift ;;
     --no-reset-env) RESET_ENV=false; shift ;;
     --drain-timeout) OUTBOX_DRAIN_TIMEOUT="$2"; shift 2 ;;
+    --matching-drain-timeout) MATCHING_DRAIN_TIMEOUT="$2"; shift 2 ;;
+    --matching-lag-max) MATCHING_LAG_MAX="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown: $1" >&2; usage; exit 1 ;;
@@ -81,7 +89,7 @@ command -v vegeta >/dev/null 2>&1 || {
   exit 1
 }
 
-log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
 case "$SIDE" in
@@ -258,6 +266,51 @@ wait_outbox_drain() {
   done
 }
 
+# 等待 Matching 消费追平；stdout: "<drain_seconds> <lag_final> <processed_final>"。
+wait_matching_drain() {
+  local api_success="$1"
+  if ! curl -sf "$METRICS_URL" >/dev/null 2>&1; then
+    log "Matching metrics 不可用（${METRICS_URL}），跳过 Matching 追平等待"
+    echo "-1 -1 -1"
+    return 0
+  fi
+  if [[ ! "$api_success" =~ ^[0-9]+$ || "$api_success" -le 0 ]]; then
+    echo "-1 -1 -1"
+    return 0
+  fi
+
+  local target processed lag start elapsed
+  target="$(awk -v a="$api_success" 'BEGIN { printf "%d", a }')"
+  start="$(date +%s)"
+  log "等待 Matching 追平（目标 processed>=${target}, lag<=${MATCHING_LAG_MAX}，超时 ${MATCHING_DRAIN_TIMEOUT}s）..."
+  while true; do
+    processed="$(prom_scalar "$METRICS_URL" "matching_commands_processed_total")"
+    lag="$(prom_scalar "$METRICS_URL" "matching_kafka_lag")"
+    processed="${processed:--1}"
+    lag="${lag:--1}"
+    elapsed=$(( $(date +%s) - start ))
+
+    if [[ "$processed" != "-1" && "$lag" != "-1" ]]; then
+      if awk -v p="$processed" -v t="$target" -v l="$lag" -v m="$MATCHING_LAG_MAX" \
+        'BEGIN { exit ! (p + 0 >= t && l + 0 <= m) }'; then
+        log "Matching 已追平（${elapsed}s，processed=${processed}，lag=${lag}）"
+        echo "$elapsed $lag $processed"
+        return 0
+      fi
+    fi
+
+    if (( elapsed >= MATCHING_DRAIN_TIMEOUT )); then
+      log "WARN: Matching 追平超时（${MATCHING_DRAIN_TIMEOUT}s），processed=${processed} lag=${lag} target=${target}"
+      echo "$elapsed ${lag} ${processed}"
+      return 0
+    fi
+    if (( elapsed > 0 && elapsed % 30 == 0 )); then
+      log "Matching processed=${processed}/${target} lag=${lag}，已等待 ${elapsed}s..."
+    fi
+    sleep "$MATCHING_DRAIN_INTERVAL"
+  done
+}
+
 parse_api_success_count() {
   local report="$1"
   local n
@@ -282,15 +335,25 @@ parse_api_success_ratio() {
   }' "$1" 2>/dev/null || echo "0"
 }
 
+# 解析 vegeta P99（支持 ms 与 s 单位）。
 parse_api_latency_p99_ms() {
   awk '/Latencies/ {
     n = 0
     for (i = 1; i <= NF; i++) {
-      if ($i ~ /ms,?/) {
+      if ($i ~ /[0-9](ms|s),?$/) {
         n++
         if (n == 4) {
-          gsub(/ms,?/, "", $i)
-          print $i
+          v = $i
+          gsub(/,/, "", v)
+          if (v ~ /ms$/) {
+            sub(/ms$/, "", v)
+            print v
+          } else if (v ~ /s$/) {
+            sub(/s$/, "", v)
+            print v * 1000
+          } else {
+            print v
+          }
           exit
         }
       }
@@ -298,9 +361,37 @@ parse_api_latency_p99_ms() {
   }' "$1" 2>/dev/null || echo "0"
 }
 
+snapshot_metrics() {
+  local url="$1" out="$2"
+  if curl -sf "$url" >"$out" 2>/dev/null; then
+    return 0
+  fi
+  : >"$out"
+  return 1
+}
+
+write_latency_breakdown() {
+  local report_dir="$1"
+  local breakdown="$report_dir/latency-breakdown.txt"
+  if ! go run "$ROOT/cmd/bench-report" \
+    -l3-breakdown \
+    -vegeta-report "$report_dir/report.txt" \
+    -order-pre "$report_dir/order-metrics-pre.prom" \
+    -order-post "$report_dir/order-metrics-post.prom" \
+    -gateway-pre "$report_dir/gateway-metrics-pre.prom" \
+    -gateway-post "$report_dir/gateway-metrics-post.prom" \
+    >"$breakdown" 2>/dev/null; then
+    log "WARN: 无法生成 latency-breakdown.txt（需 Gateway :9103 与 Order :9104 指标）"
+    return 1
+  fi
+  log "延迟分解: $breakdown"
+  cat "$breakdown" >&2
+}
+
 write_pipeline_summary() {
   local report="$1" summary="$2"
   local api_success matching_processed completion drain_sec pending_final
+  local matching_drain_sec matching_lag_final
   local success_ratio p99_ms accept_sla delivery_sla
 
   api_success="$(parse_api_success_count "$report")"
@@ -308,6 +399,8 @@ write_pipeline_summary() {
   matching_processed="${matching_processed:--1}"
   drain_sec="$3"
   pending_final="$4"
+  matching_drain_sec="$5"
+  matching_lag_final="$6"
 
   if [[ "$api_success" =~ ^[0-9]+$ && "$api_success" -gt 0 && "$matching_processed" != "-1" ]]; then
     completion="$(awk -v m="$matching_processed" -v a="$api_success" 'BEGIN { printf "%.4f", m / a }')"
@@ -332,6 +425,8 @@ write_pipeline_summary() {
     echo "pipeline_completion_rate=${completion}"
     echo "outbox_drain_seconds=${drain_sec}"
     echo "outbox_pending_final=${pending_final}"
+    echo "matching_drain_seconds=${matching_drain_sec}"
+    echo "matching_lag_final=${matching_lag_final}"
     echo "api_success_ratio=${success_ratio}%"
     echo "api_latency_p99_ms=${p99_ms}"
     echo "accept_sla=${accept_sla}"
@@ -389,6 +484,17 @@ fi
 
 generate_targets "$count"
 
+log "采集压测前 metrics 快照（order/gateway/pg）..."
+snapshot_metrics "$ORDER_METRICS_URL" "$REPORT_DIR/order-metrics-pre.prom" \
+  || log "WARN: Order metrics 不可用（${ORDER_METRICS_URL}）"
+snapshot_metrics "$GATEWAY_METRICS_URL" "$REPORT_DIR/gateway-metrics-pre.prom" \
+  || log "WARN: Gateway metrics 不可用（${GATEWAY_METRICS_URL}），请 ./scripts/dev.sh start --build 重启 gateway"
+if bash "$ROOT/scripts/bench/collect-pg-stats.sh" "$REPORT_DIR/pg-stats-pre.txt"; then
+  log "PG 快照: $REPORT_DIR/pg-stats-pre.txt"
+else
+  log "WARN: PG stats 采集失败（无 psql/postgres 容器）"
+fi
+
 log "vegeta attack（-format=json）..."
 vegeta attack -format=json -targets="$TARGETS" -rate="$RATE" -duration="$DURATION" -workers="$WORKERS" >"$RESULTS"
 vegeta report -type=text "$RESULTS" | tee "$REPORT_DIR/report.txt"
@@ -396,18 +502,47 @@ vegeta report -type='hist[0,2ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s]' "$RESU
 
 read -r OUTBOX_DRAIN_SEC OUTBOX_PENDING_FINAL <<<"$(wait_outbox_drain)"
 
-log "Order outbox 最终快照（:9104）..."
-curl -sf "$ORDER_METRICS_URL" 2>/dev/null | grep -E 'order_outbox|order_stuck' | tee "$REPORT_DIR/order-metrics.txt" || true
+API_SUCCESS_COUNT="$(parse_api_success_count "$REPORT_DIR/report.txt")"
+read -r MATCHING_DRAIN_SEC MATCHING_LAG_FINAL MATCHING_PROCESSED_AT_DRAIN <<<"$(wait_matching_drain "$API_SUCCESS_COUNT")"
+
+log "采集压测后 metrics 快照（order/gateway/pg）..."
+snapshot_metrics "$ORDER_METRICS_URL" "$REPORT_DIR/order-metrics-post.prom" || true
+snapshot_metrics "$GATEWAY_METRICS_URL" "$REPORT_DIR/gateway-metrics-post.prom" || true
+if bash "$ROOT/scripts/bench/collect-pg-stats.sh" "$REPORT_DIR/pg-stats-post.txt"; then
+  bash "$ROOT/scripts/bench/collect-pg-stats.sh" --delta \
+    "$REPORT_DIR/pg-stats-pre.txt" "$REPORT_DIR/pg-stats-post.txt" \
+    "$REPORT_DIR/pg-stats-delta.txt" 2>/dev/null || true
+  log "PG 快照: $REPORT_DIR/pg-stats-post.txt"
+  log "PG 差分: $REPORT_DIR/pg-stats-delta.txt"
+else
+  log "WARN: PG stats 采集失败"
+fi
+
+log "Order 指标摘要（:9104）..."
+{
+  curl -sf "$ORDER_METRICS_URL" 2>/dev/null | grep -E 'order_outbox|order_stuck|order_place_order|order_grpc_place_order' || true
+} | tee "$REPORT_DIR/order-metrics.txt"
+
+if curl -sf "$GATEWAY_METRICS_URL" >/dev/null 2>&1; then
+  curl -sf "$GATEWAY_METRICS_URL" 2>/dev/null | grep -E 'gateway_place_order' | tee "$REPORT_DIR/gateway-metrics.txt" || true
+else
+  log "WARN: Gateway metrics 不可用（${GATEWAY_METRICS_URL}）"
+fi
+
+write_latency_breakdown "$REPORT_DIR" || true
 
 log "Matching 指标快照（Outbox 排空后）..."
 if curl -sf "$METRICS_URL" >/dev/null 2>&1; then
-  go run "$ROOT/cmd/bench-report/main.go" -url "$METRICS_URL" | tee "$REPORT_DIR/matching-metrics.txt"
+  go run "$ROOT/cmd/bench-report" -url "$METRICS_URL" | tee "$REPORT_DIR/matching-metrics.txt"
 else
   log "WARN: Matching metrics 不可用（${METRICS_URL}），跳过 matching-metrics.txt"
 fi
 
 write_pipeline_summary "$REPORT_DIR/report.txt" "$REPORT_DIR/pipeline_summary.txt" \
-  "$OUTBOX_DRAIN_SEC" "$OUTBOX_PENDING_FINAL"
+  "$OUTBOX_DRAIN_SEC" "$OUTBOX_PENDING_FINAL" \
+  "$MATCHING_DRAIN_SEC" "$MATCHING_LAG_FINAL"
 
 log "报告: $REPORT_DIR/"
 log "管道摘要: $REPORT_DIR/pipeline_summary.txt"
+log "延迟分解: $REPORT_DIR/latency-breakdown.txt"
+log "PG IO: $REPORT_DIR/pg-stats-delta.txt"

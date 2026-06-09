@@ -19,11 +19,13 @@ import (
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/cli"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/config"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/consumer"
+	"github.com/Grizzly1127/trading_matchengine/internal/matching/eventrelay"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/orderclient"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/publisher"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/recovery"
 	"github.com/Grizzly1127/trading_matchengine/internal/matching/shardbind"
+	"github.com/Grizzly1127/trading_matchengine/pkg/eventoutbox"
 	"github.com/Grizzly1127/trading_matchengine/pkg/kafka"
 	"github.com/Grizzly1127/trading_matchengine/pkg/logger"
 	"github.com/Grizzly1127/trading_matchengine/pkg/symbolrules"
@@ -247,9 +249,9 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 		Int64("start_offset", start).
 		Strs("brokers", cfg.Kafka.Brokers).
 		Str("command_topic", cfg.Kafka.CommandTopic).
+		Bool("event_outbox_enabled", cfg.EventOutbox.Enabled).
 		Msg("kafka consumer starting")
 
-	// Matching 以 WAL 维护 kafka 位点，不用 consumer group（避免 __consumer_offsets 残留导致空 WAL 仍重放历史）。
 	reader, err := kafka.NewCommandReader(kafka.ReaderConfig{
 		Brokers:     cfg.Kafka.Brokers,
 		Topic:       cfg.Kafka.CommandTopic,
@@ -265,6 +267,33 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 	writer := kafka.NewEventWriter(cfg.Kafka.EventWriterConfig())
 	defer writer.Close()
 
+	var outboxWriter *eventoutbox.FileWriter
+	if cfg.EventOutbox.Enabled {
+		outboxWriter, err = eventoutbox.OpenFileWriter(cfg.EventOutboxDir(), cfg.EventOutboxWriterConfig())
+		if err != nil {
+			return fmt.Errorf("open event outbox: %w", err)
+		}
+		defer outboxWriter.Close()
+
+		relayCtx, relayCancel := context.WithCancel(ctx)
+		defer relayCancel()
+		relay := &eventrelay.Relay{
+			Dir:     outboxWriter.Dir(),
+			Writer:  writer,
+			Log:     log.With().Str("component", "event_relay").Logger(),
+			Metrics: m,
+			Config: eventrelay.Config{
+				PollInterval: time.Duration(cfg.EventRelay.PollIntervalMs) * time.Millisecond,
+				BatchSize:    cfg.EventRelay.BatchSize,
+				Workers:      cfg.EventRelay.Workers,
+				MatchTopic:   cfg.Kafka.MatchTopic,
+				TradeTopic:   cfg.Kafka.TradeTopic,
+			},
+		}
+		go relay.Run(relayCtx)
+		log.Info().Str("dir", outboxWriter.Dir()).Msg("event outbox relay started")
+	}
+
 	pub := &publisher.KafkaPublisher{
 		Producer:   writer,
 		MatchTopic: cfg.Kafka.MatchTopic,
@@ -272,10 +301,11 @@ func runKafka(ctx context.Context, cfg config.Config, eng *recovery.Engine, log 
 		Metrics:    m,
 	}
 	h := &consumer.Handler{
-		Engine:    eng,
-		Publisher: pub,
-		Partition: uint32(partition),
-		Metrics:   m,
+		Engine:      eng,
+		Publisher:   pub,
+		EventOutbox: outboxWriter,
+		Partition:   uint32(partition),
+		Metrics:     m,
 	}
 	go pollKafkaLag(ctx, reader, m, log)
 	batchMax, batchWait := cfg.WALGroupCommit.ConsumerRunOptions()

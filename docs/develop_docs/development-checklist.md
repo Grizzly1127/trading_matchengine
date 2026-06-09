@@ -210,6 +210,7 @@
 - [ ] 压测：单交易对 TPS ≥ 5000，撮合 P99 ≤ 10ms（方案与脚本见 [docs/benchmark.md](../benchmark.md)）
 - [x] WAL 组提交（`wal_group_commit`、`Stage`+`CommitBatch`、`ProcessBatch`；见 [l2-optimization-roadmap.md](./l2-optimization-roadmap.md) §4.1）
 - [ ] L2 其余优化（Kafka 热路径 / 协议聚合等，见路线图 §4.2+）
+- [ ] Matching Event Outbox + 异步 Relay（设计 [matching-event-outbox-design.md](./matching-event-outbox-design.md)；P0–P2 已实现，待 L2/L3 复测）
 - [x] L0 微基准 + L2/L3 脚本骨架（`make bench-l0`、`scripts/bench/`、`cmd/bench-producer`）
 - [ ] L3 Outbox Relay 优化（P0/P1 已实现；复测投递吞吐，Phase 2 见 [l3-optimization-roadmap.md](./l3-optimization-roadmap.md)）
 - [ ] 按 [docs/benchmark.md](../benchmark.md) 跑通 M3 并归档 `reports/` PASS（优先 `metrics-load-window.txt`）

@@ -122,7 +122,7 @@ TPS_max ≈ 1 / 平均每条墙钟耗时（processing，含 WAL + 撮合 + Publi
 
 **语义**：仍「WAL durable → 全批发布成功 → 再逐条 commit offset」；发布失败整批不 commit。
 
-**未做（刻意）**：按命令单条 outbound 改协议；异步发布 + Outbox（§6 架构待定）。
+**未做（实现中）**：异步发布 + Event Outbox — 设计见 [matching-event-outbox-design.md](./matching-event-outbox-design.md)（§6 选项 B）。
 
 | 项 | 说明 | SLA |
 |----|------|-----|
@@ -130,7 +130,7 @@ TPS_max ≈ 1 / 平均每条墙钟耗时（processing，含 WAL + 撮合 + Publi
 | 压缩 | lz4/zstd | 配置 |
 | 批级聚合发布 | 组提交批内 N 命令 → ~2 次 WriteBatch（match+trade） | 已实现 |
 | 序列化 scratch 复用 | 热路径少分配 | 已实现 |
-| 异步发布 + Outbox | 发布与 commit 解耦 | **架构变更**，需 spec §6.2 |
+| 异步发布 + Event Outbox | 发布与 commit 解耦 | **设计已定**，见 [matching-event-outbox-design.md](./matching-event-outbox-design.md) |
 
 **禁止**：未 fsync、未达发布语义就 commit offset（除非改为合规的 Outbox 方案）。
 
@@ -191,7 +191,7 @@ TPS_max ≈ 1 / 平均每条墙钟耗时（processing，含 WAL + 撮合 + Publi
 | 选项 | 说明 |
 |------|------|
 | A. 允许 **WAL group commit**（及测试） | 摊销 fsync，保持恢复语义 |
-| B. 允许 **异步发布 + Transactional Outbox** | 缩短热路径墙钟，commit 规则写清 |
+| B. 允许 **异步发布 + Event Outbox** | 缩短热路径墙钟；设计见 [matching-event-outbox-design.md](./matching-event-outbox-design.md) |
 | C. 将 **5000/s 定义为 shard 多 symbol 合计** | 非单 BTC-USDT 链 |
 | D. 下调单 symbol TPS 目标至 **~100–200/s**（ms 级延迟产品） | 与现状设计一致 |
 
@@ -223,6 +223,7 @@ TPS_max ≈ 1 / 平均每条墙钟耗时（processing，含 WAL + 撮合 + Publi
 | 环境重置 | `scripts/bench/reset-l2-env.sh` |
 | WAL 实现 | `pkg/wal/writer.go` |
 | 发布 | `internal/matching/publisher/publisher.go` |
+| Event Outbox 设计 | [matching-event-outbox-design.md](./matching-event-outbox-design.md) |
 | 消费热路径 | `internal/matching/consumer/handler.go` |
 
 ---

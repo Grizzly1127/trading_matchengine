@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"errors"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	ordermetrics "github.com/Grizzly1127/trading_matchengine/internal/order/metrics"
 	"github.com/Grizzly1127/trading_matchengine/internal/order/service"
 	orderv1 "github.com/Grizzly1127/trading_matchengine/pkg/pb/order/v1"
 )
@@ -14,14 +16,20 @@ import (
 // Server 实现 order.v1.OrderService gRPC。
 type OrderServer struct {
 	orderv1.UnimplementedOrderServiceServer
-	Svc *service.OrderService
+	Svc     *service.OrderService
+	Metrics *ordermetrics.Metrics
 }
 
 // PlaceOrder 创建订单。
 func (s *OrderServer) PlaceOrder(ctx context.Context, req *orderv1.PlaceOrderRequest) (*orderv1.PlaceOrderResponse, error) {
-	return invokeOrder(s, req, func() (*orderv1.PlaceOrderResponse, error) {
+	start := time.Now()
+	resp, err := invokeOrder(s, req, func() (*orderv1.PlaceOrderResponse, error) {
 		return s.Svc.PlaceOrder(ctx, req)
 	})
+	if s.Metrics != nil {
+		s.Metrics.ObserveGRPCPlaceOrder(time.Since(start))
+	}
+	return resp, err
 }
 
 // CancelOrder 撤销订单。

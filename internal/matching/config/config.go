@@ -32,6 +32,8 @@ type Config struct {
 	MetricsListen   string                      `json:"metrics_listen"`
 	AdminGRPCListen string                      `json:"admin_grpc_listen"`
 	OrderService    OrderServiceConfig          `json:"order_service"`
+	EventOutbox     EventOutboxConfig           `json:"event_outbox"`
+	EventRelay      EventRelayConfig            `json:"event_relay"`
 	Kafka           KafkaConfig                 `json:"kafka"`
 	Log             LogConfig                   `json:"log"`
 }
@@ -138,6 +140,7 @@ func (c *Config) applyDefaults(raw map[string]json.RawMessage) {
 	}
 	c.applyKafkaDefaults(raw)
 	c.applyWALGroupCommitDefaults(raw)
+	c.applyEventOutboxDefaults(raw)
 	c.applyOrderServiceDefaults(raw)
 	c.applySymbolDefaults()
 	if c.Log.Level == "" {
@@ -216,6 +219,25 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func (c *Config) applyEventOutboxDefaults(raw map[string]json.RawMessage) {
+	if c.EventOutbox.SyncEveryRecords <= 0 {
+		c.EventOutbox.SyncEveryRecords = c.WALGroupCommit.SyncEveryRecords
+	}
+	if c.EventOutbox.SyncIntervalMs <= 0 {
+		c.EventOutbox.SyncIntervalMs = c.WALGroupCommit.SyncIntervalMs
+	}
+	if c.EventRelay.PollIntervalMs <= 0 {
+		c.EventRelay.PollIntervalMs = 2
+	}
+	if c.EventRelay.BatchSize <= 0 {
+		c.EventRelay.BatchSize = 256
+	}
+	if c.EventRelay.Workers <= 0 {
+		c.EventRelay.Workers = 1
+	}
+	_ = raw
 }
 
 func (c *Config) applyOrderServiceDefaults(raw map[string]json.RawMessage) {
